@@ -29,3 +29,53 @@ body {
 .markdown-body code {
   @apply bg-zinc-800 px-1 rounded text-[#CCFF00] font-mono text-sm;
 }
+
+/* Chat message markdown styling */
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  margin: 0.5rem 0;
+}
+
+.prose th {
+  background-color: rgba(204, 255, 0, 0.1);
+  border: 1px solid #3f3f46;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.prose td {
+  border: 1px solid #3f3f46;
+  padding: 0.4rem 0.6rem;
+  white-space: nowrap;
+}
+
+.prose blockquote {
+  border-left: 3px solid #CCFF00;
+  padding-left: 0.75rem;
+  margin: 0.5rem 0;
+  font-style: italic;
+  color: #a1a1aa;
+}
+
+.prose h3, .prose h4 {
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.prose hr {
+  border-color: #3f3f46;
+  margin: 0.75rem 0;
+}
+
+/* Hide scrollbar but keep scroll functional */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

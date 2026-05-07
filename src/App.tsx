@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useRef, createContext, useContext, useMemo } from 'react';
 import {
   Dumbbell,
   History,
@@ -90,6 +90,7 @@ import {
   PolarRadiusAxis
 } from 'recharts';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // --- Context & State ---
 const AuthContext = createContext<{
@@ -264,9 +265,19 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
   );
 };
 
-const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: UserProfile | null, workouts: WorkoutLog[], onUpdate: (data: Partial<UserProfile>) => void, onSignOut: () => void }) => {
+const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit, onEditModeChange }: { profile: UserProfile | null, workouts: WorkoutLog[], onUpdate: (data: Partial<UserProfile>) => void, onSignOut: () => void, forceExitEdit?: number, onEditModeChange?: (editing: boolean) => void }) => {
   const { sheets } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
+
+  // Exit edit mode when parent triggers back button
+  useEffect(() => {
+    if (forceExitEdit && forceExitEdit > 0) setIsEditing(false);
+  }, [forceExitEdit]);
+
+  // Notify parent of edit mode changes
+  useEffect(() => {
+    onEditModeChange?.(isEditing);
+  }, [isEditing]);
   const [isRefining, setIsRefining] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -857,7 +868,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
       </header>
 
       <div className="bg-[#1A1A1A] p-4 rounded-2xl border border-zinc-800 space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center space-x-1 bg-black/30 p-1 rounded-xl">
             {(['all', 'week', 'month', 'year', 'custom'] as const).map((type) => (
               <button
@@ -874,7 +885,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
               </button>
             ))}
           </div>
-          <div className="flex items-center space-x-2 text-[10px] text-zinc-500 font-mono uppercase">
+          <div className="flex items-center space-x-2 text-[10px] text-zinc-500 font-mono uppercase shrink-0">
             <span className="w-2 h-2 rounded-full bg-[#CCFF00] animate-pulse" />
             <span>{filteredWorkouts.length} Results</span>
           </div>
@@ -2203,11 +2214,20 @@ CORE BEHAVIOR:
 1. CONVERSATIONAL AWARENESS: Respond naturally to greetings.
 2. NEURAL MEMORY: Check the "Chat History Summary" for personal details like the user's name, past injuries, or specific gear. If the user mentioned their name previously, use it!
 3. GOAL PRIORITY: The user's "Primary Goal" and "Detailed Aim" are your TOP PRIORITY. All suggestions, routines, and analysis must align strictly with these.
-4. RESPONSE STYLE: When talking fitness, be direct and expert. No fluff.
+4. RESPONSE STYLE: Mirror the user's tone and energy. If they're straight to the point, be concise and direct. If they're playful or naughty, match that vibe. If they're rude or aggressive, fire back with the same energy — no filter. Always keep the fitness expertise, but adapt your personality to match theirs like a real gym bro would.
 5. PERSONALIZATION: Always leverage the provided profile and workout history context.
-5. ROUTINE FORMAT: Use matrices for routines.
-6. ROUTINE MANAGEMENT: Use tools to persist changes.
-7. PROFILE UPDATES: If the user explicitly tells you their name, goal, or gear, use the 'update_profile' tool to save it permanently.
+6. ROUTINE FORMAT: Use markdown tables for routines (with | Exercise | Sets | Reps | format).
+7. ROUTINE MANAGEMENT: Use tools to persist changes.
+8. PROFILE UPDATES: If the user explicitly tells you their name, goal, or gear, use the 'update_profile' tool to save it permanently.
+
+FORMATTING RULES (MANDATORY):
+- Always respond in **Markdown** format.
+- Use **bold** for exercise names, key metrics, and emphasis.
+- Use bullet points (- or *) for lists of exercises, tips, or instructions.
+- Use ### headings to organize sections (e.g., ### Workout Plan, ### Notes).
+- Use markdown tables (| col | col |) for workout routines and schedules.
+- Use > blockquotes for motivational tips or important callouts.
+- Keep paragraphs short and scannable.
 
 REFERENCE DATA:
 ---
@@ -2527,17 +2547,24 @@ ${workoutContext || "No history yet."}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               key={i}
               className={cn(
-                "p-4 rounded-3xl text-sm max-w-[85%] shadow-md",
+                "p-4 rounded-3xl text-sm shadow-md",
                 m.role === 'user'
-                  ? (chatTheme === 'light' ? "bg-[#CCFF00] text-black ml-auto rounded-tr-none border border-[#CCFF00]/20" : "bg-zinc-800 text-white ml-auto rounded-tr-none border border-zinc-700 shadow-white/5")
-                  : (chatTheme === 'light' ? "bg-zinc-900 text-white rounded-tl-none border border-zinc-800" : "bg-[#1A1A1A] text-white rounded-tl-none border border-zinc-800 shadow-lg shadow-black/20")
+                  ? cn("max-w-[85%] ml-auto rounded-tr-none", chatTheme === 'light' ? "bg-[#CCFF00] text-black border border-[#CCFF00]/20" : "bg-zinc-800 text-white border border-zinc-700 shadow-white/5")
+                  : cn("max-w-full rounded-tl-none", chatTheme === 'light' ? "bg-zinc-900 text-white border border-zinc-800" : "bg-[#1A1A1A] text-white border border-zinc-800 shadow-lg shadow-black/20")
               )}
             >
               <div className={cn(
-                "prose prose-sm max-w-none prose-headings:font-bold prose-p:leading-relaxed",
-                m.role === 'bot' ? "prose-invert" : (chatTheme === 'light' ? "text-black prose-p:text-black prose-headings:text-black prose-strong:text-black prose-code:text-black" : "text-white prose-invert")
+                "prose prose-sm max-w-none overflow-x-auto",
+                "prose-headings:font-bold prose-headings:mt-3 prose-headings:mb-1",
+                "prose-p:leading-relaxed prose-p:my-1",
+                "prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5",
+                "prose-table:text-xs prose-table:w-full prose-th:px-3 prose-th:py-1.5 prose-th:border prose-th:border-zinc-700 prose-td:px-3 prose-td:py-1.5 prose-td:border prose-td:border-zinc-700",
+                "prose-blockquote:border-l-2 prose-blockquote:border-[#CCFF00] prose-blockquote:pl-3 prose-blockquote:italic prose-blockquote:my-2",
+                "prose-code:text-[#CCFF00] prose-code:bg-zinc-800/50 prose-code:px-1 prose-code:rounded prose-code:text-xs",
+                "prose-strong:font-bold",
+                m.role === 'bot' ? "prose-invert" : (chatTheme === 'light' ? "text-black prose-p:text-black prose-headings:text-black prose-strong:text-black prose-code:text-black prose-code:bg-black/10" : "text-white prose-invert")
               )}>
-                <ReactMarkdown>{m.text}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
               </div>
             </motion.div>
           ))}
@@ -2639,6 +2666,83 @@ export default function App() {
   const [activeRoutine, setActiveRoutine] = useState<Routine | null>(null);
   const [workouts, setWorkouts] = useState<WorkoutLog[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
+
+  // Back button + floating workout bubble state
+  const [isWorkoutMinimized, setIsWorkoutMinimized] = useState(false);
+  const [workoutStartTime, setWorkoutStartTime] = useState<number | null>(null);
+  const [workoutElapsed, setWorkoutElapsed] = useState(0);
+  const [profileForceExit, setProfileForceExit] = useState(0);
+  const [profileIsEditing, setProfileIsEditing] = useState(false);
+
+  // Refs for popstate handler (so it always has latest values without re-registering)
+  const activeTabRef = useRef(activeTab);
+  const isLoggingRef = useRef(isLogging);
+  const editingRoutineRef = useRef(editingRoutine);
+  const isWorkoutMinimizedRef = useRef(isWorkoutMinimized);
+  const profileIsEditingRef = useRef(profileIsEditing);
+
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+  useEffect(() => { isLoggingRef.current = isLogging; }, [isLogging]);
+  useEffect(() => { editingRoutineRef.current = editingRoutine; }, [editingRoutine]);
+  useEffect(() => { isWorkoutMinimizedRef.current = isWorkoutMinimized; }, [isWorkoutMinimized]);
+  useEffect(() => { profileIsEditingRef.current = profileIsEditing; }, [profileIsEditing]);
+
+  // Browser back button handler
+  useEffect(() => {
+    window.history.pushState({ app: true }, '');
+
+    const handlePopState = () => {
+      // Priority 1: If editing a routine, close editor
+      if (editingRoutineRef.current) {
+        setEditingRoutine(null);
+        window.history.pushState({ app: true }, '');
+        return;
+      }
+
+      // Priority 2: If logging workout (not minimized), minimize it
+      if (isLoggingRef.current && !isWorkoutMinimizedRef.current) {
+        setIsWorkoutMinimized(true);
+        setActiveTab('routines');
+        window.history.pushState({ app: true }, '');
+        return;
+      }
+
+      // Priority 3: If on profile and editing, exit edit mode
+      if (activeTabRef.current === 'profile' && profileIsEditingRef.current) {
+        setProfileForceExit(prev => prev + 1);
+        window.history.pushState({ app: true }, '');
+        return;
+      }
+
+      // Priority 4: If on any non-home tab, go to home
+      if (activeTabRef.current !== 'dash') {
+        setActiveTab('dash');
+        window.history.pushState({ app: true }, '');
+        return;
+      }
+
+      // Priority 5: Already on home, push state to prevent app exit
+      window.history.pushState({ app: true }, '');
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Timer for minimized workout bubble
+  useEffect(() => {
+    if (!isWorkoutMinimized || !workoutStartTime) return;
+    const timer = setInterval(() => {
+      setWorkoutElapsed(Math.floor((Date.now() - workoutStartTime) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isWorkoutMinimized, workoutStartTime]);
+
+  const formatBubbleTime = (seconds: number) => {
+    const min = Math.floor(seconds / 60);
+    const sec = seconds % 60;
+    return `${min}:${sec.toString().padStart(2, '0')}`;
+  };
 
   useEffect(() => {
     testFirestoreConnection();
@@ -2921,90 +3025,129 @@ export default function App() {
       );
     }
 
-    if (isLogging) {
-      return (
-        <WorkoutLogger
-          routine={activeRoutine || undefined}
-          workouts={workouts}
-          onComplete={() => {
-            setIsLogging(false);
-            setActiveRoutine(null);
-            fetchWorkouts(user.uid);
-          }}
-          onCancel={() => {
-            setIsLogging(false);
-            setActiveRoutine(null);
-          }}
-        />
-      );
-    }
-
     return (
-      <div className="min-h-screen bg-[#0A0A0A] text-white">
-        <main className="h-[calc(100vh-5rem)] overflow-hidden">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, x: 10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
-              transition={{ duration: 0.2 }}
-              className={activeTab === 'ai' ? 'h-full' : 'p-6'}
-            >
-              {activeTab === 'dash' && <Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} />}
-              {activeTab === 'ai' && (
-                <AIAssistant
-                  workouts={workouts}
-                  profile={profile}
-                  routines={routines}
-                  onCreateRoutine={aiCreateRoutine}
-                  onUpdateRoutine={aiUpdateRoutine}
-                  onDeleteRoutine={aiDeleteRoutine}
-                  onUpdateProfile={updateProfile}
-                />
-              )}
-              {activeTab === 'routines' && (
-                <RoutinesManager
-                  routines={routines}
-                  onStart={(r) => { setActiveRoutine(r); setIsLogging(true); }}
-                  onEdit={(r) => setEditingRoutine(r)}
-                  onCreate={() => setEditingRoutine('new')}
-                  onDelete={deleteRoutine}
-                />
-              )}
-              {activeTab === 'profile' && (
-                <ProfileSection
-                  profile={profile}
-                  workouts={workouts}
-                  onUpdate={updateProfile}
-                  onSignOut={signOutUser}
-                />
-              )}
-            </motion.div>
-          </AnimatePresence>
-        </main>
+      <>
+        {/* WorkoutLogger: stays mounted when minimized to preserve timer + state */}
+        {isLogging && (
+          <div className={isWorkoutMinimized ? 'hidden' : ''}>
+            <WorkoutLogger
+              routine={activeRoutine || undefined}
+              workouts={workouts}
+              onComplete={() => {
+                setIsLogging(false);
+                setIsWorkoutMinimized(false);
+                setActiveRoutine(null);
+                setWorkoutStartTime(null);
+                fetchWorkouts(user.uid);
+              }}
+              onCancel={() => {
+                setIsLogging(false);
+                setIsWorkoutMinimized(false);
+                setActiveRoutine(null);
+                setWorkoutStartTime(null);
+              }}
+            />
+          </div>
+        )}
 
-        <nav className="fixed bottom-0 left-0 right-0 bg-[#0A0A0A]/80 backdrop-blur-xl border-t border-zinc-800 px-6 py-4 pb-8 flex items-center justify-between z-40">
-          {[
-            { id: 'dash', icon: History, label: 'Stats' },
-            { id: 'routines', icon: Library, label: 'Library' },
-            { id: 'ai', icon: Brain, label: 'Coach' },
-            { id: 'profile', icon: UserIcon, label: 'Me' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={cn(
-                "flex flex-col items-center space-y-1 transition-all flex-1",
-                activeTab === tab.id ? "text-[#CCFF00]" : "text-zinc-500"
-              )}
-            >
-              <tab.icon className={cn("w-6 h-6", activeTab === tab.id && "fill-current")} />
-              <span className="text-[10px] font-mono uppercase tracking-widest">{tab.label}</span>
-            </button>
-          ))}
-        </nav>
-      </div>
+        {/* Normal tab content: shown when not logging OR when minimized */}
+        {(!isLogging || isWorkoutMinimized) && (
+          <div className="min-h-screen bg-[#0A0A0A] text-white">
+            <main className={cn("h-[calc(100vh-5rem)]", activeTab === 'ai' ? 'overflow-hidden' : 'overflow-y-auto pb-20')}>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className={activeTab === 'ai' ? 'h-full' : 'p-6'}
+                >
+                  {activeTab === 'dash' && <Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} />}
+                  {activeTab === 'ai' && (
+                    <AIAssistant
+                      workouts={workouts}
+                      profile={profile}
+                      routines={routines}
+                      onCreateRoutine={aiCreateRoutine}
+                      onUpdateRoutine={aiUpdateRoutine}
+                      onDeleteRoutine={aiDeleteRoutine}
+                      onUpdateProfile={updateProfile}
+                    />
+                  )}
+                  {activeTab === 'routines' && (
+                    <RoutinesManager
+                      routines={routines}
+                      onStart={(r) => { setActiveRoutine(r); setIsLogging(true); setIsWorkoutMinimized(false); setWorkoutStartTime(Date.now()); }}
+                      onEdit={(r) => setEditingRoutine(r)}
+                      onCreate={() => setEditingRoutine('new')}
+                      onDelete={deleteRoutine}
+                    />
+                  )}
+                  {activeTab === 'profile' && (
+                    <ProfileSection
+                      profile={profile}
+                      workouts={workouts}
+                      onUpdate={updateProfile}
+                      onSignOut={signOutUser}
+                      forceExitEdit={profileForceExit}
+                      onEditModeChange={setProfileIsEditing}
+                    />
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </main>
+
+            <nav className="fixed bottom-0 left-0 right-0 bg-[#0A0A0A]/80 backdrop-blur-xl border-t border-zinc-800 px-6 py-4 pb-8 flex items-center justify-between z-40">
+              {[
+                { id: 'dash', icon: History, label: 'Stats' },
+                { id: 'routines', icon: Library, label: 'Library' },
+                { id: 'ai', icon: Brain, label: 'Coach' },
+                { id: 'profile', icon: UserIcon, label: 'Me' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={cn(
+                    "flex flex-col items-center space-y-1 transition-all flex-1 relative",
+                    activeTab === tab.id ? "text-[#CCFF00]" : "text-zinc-500"
+                  )}
+                >
+                  {/* Floating workout bubble — above the Me icon */}
+                  {tab.id === 'profile' && isWorkoutMinimized && isLogging && (
+                    <motion.div
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      onClick={(e) => { e.stopPropagation(); setIsWorkoutMinimized(false); }}
+                      className="absolute -top-14 left-1/2 -translate-x-1/2 z-50"
+                    >
+                      <div className="relative">
+                        {/* Pulsing ring */}
+                        <motion.div
+                          animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0, 0.5] }}
+                          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                          className="absolute inset-0 rounded-full bg-[#CCFF00]/30"
+                        />
+                        {/* Bubble body */}
+                        <div className="w-12 h-12 rounded-full bg-[#CCFF00] flex items-center justify-center shadow-lg shadow-[#CCFF00]/30 border-2 border-[#CCFF00]/50">
+                          <div className="text-center">
+                            <Dumbbell className="w-4 h-4 text-black mx-auto" />
+                            <span className="text-[7px] font-mono font-bold text-black leading-none">
+                              {formatBubbleTime(workoutElapsed)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                  <tab.icon className={cn("w-6 h-6", activeTab === tab.id && "fill-current")} />
+                  <span className="text-[10px] font-mono uppercase tracking-widest">{tab.label}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
+        )}
+      </>
     );
   };
 
