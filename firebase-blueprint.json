@@ -1,0 +1,127 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile data",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "weight": { "type": "number" },
+        "height": { "type": "number" },
+        "goal": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Workout": {
+      "title": "Workout",
+      "description": "A single workout session log",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "duration": { "type": "number" },
+        "totalVolume": { "type": "number" },
+        "exercises": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "exerciseId": { "type": "string" },
+              "name": { "type": "string" },
+              "sets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "reps": { "type": "number" },
+                    "weight": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "date", "exercises", "createdAt"]
+    },
+    "Routine": {
+      "title": "Routine",
+      "description": "A template for a workout session",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "exercises": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "exercises", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "A chat session",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A single message in a chat history",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["user", "bot", "system"] },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["role", "text", "timestamp"]
+    },
+    "ChatSummary": {
+      "title": "ChatSummary",
+      "description": "A summary of past chat history",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "summary": { "type": "string" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "summary", "lastUpdated"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "workouts/{workoutId}": {
+      "schema": "Workout",
+      "description": "Workout logs"
+    },
+    "routines/{routineId}": {
+      "schema": "Routine",
+      "description": "Saved workout routines"
+    },
+    "users/{userId}/conversations/{convId}": {
+      "schema": "Conversation",
+      "description": "Chat sessions"
+    },
+    "users/{userId}/conversations/{convId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages within a conversation"
+    },
+    "users/{userId}/chat_summary/main": {
+      "schema": "ChatSummary",
+      "description": "Summarized long-term chat history"
+    }
+  }
+}

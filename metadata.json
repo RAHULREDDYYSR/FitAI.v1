@@ -1,0 +1,6 @@
+{
+  "name": "FitAI",
+  "description": "An AI-powered fitness companion for personalized workout tracking, routine building, and intelligent coaching, inspired by Hevy.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}

@@ -1,0 +1,1348 @@
+[
+  {
+    "id": "wger-167",
+    "name": "Cable Woodchoppers",
+    "category": "Abs",
+    "muscles": [
+      "Obliquus externus abdominis"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/167_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/167_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-106",
+    "name": "Rowing, T-bar",
+    "category": "Back",
+    "muscles": [
+      "Lats",
+      "Shoulders",
+      "Biceps",
+      "Brachialis"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/106_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/106_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-95",
+    "name": "Sit-ups",
+    "category": "Abs",
+    "muscles": [
+      "Abs"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/95_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/95_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-92",
+    "name": "Crunches With Cable",
+    "category": "Abs",
+    "muscles": [
+      "Abs"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/92_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/92_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-91",
+    "name": "Crunches",
+    "category": "Abs",
+    "muscles": [
+      "Abs",
+      "Serratus anterior"
+    ],
+    "equipment": [
+      "Gym mat"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/91_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/91_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-197",
+    "name": "Overhand Cable Curl",
+    "category": "Abs",
+    "muscles": [
+      "Biceps"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/197_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/197_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-275",
+    "name": "Dumbbell Concentration Curl",
+    "category": "Arms",
+    "muscles": [
+      "Brachialis",
+      "Biceps"
+    ],
+    "equipment": [
+      "Dumbbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/275_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/275_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-268",
+    "name": "Bent High Pulls",
+    "category": "Shoulders",
+    "muscles": [
+      "Trapezius"
+    ],
+    "equipment": [
+      "Dumbbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/268_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/268_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-206",
+    "name": "Incline Dumbbell Fly",
+    "category": "Chest",
+    "muscles": [
+      "Chest"
+    ],
+    "equipment": [
+      "Dumbbell",
+      "Incline bench"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/206_main.png",
+        "/assets/exercises/206_main_1.png"
+      ],
+      "secondary": [
+        "/assets/exercises/206_secondary.png",
+        "/assets/exercises/206_secondary_1.png",
+        "/assets/exercises/206_secondary_2.png",
+        "/assets/exercises/206_secondary_3.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-154",
+    "name": "Leg Curls (laying)",
+    "category": "Legs",
+    "muscles": [
+      "Hamstrings"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/154_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/154_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-83",
+    "name": "Dips Between Two Benches",
+    "category": "Arms",
+    "muscles": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Bench"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/83_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/83_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-84",
+    "name": "Skullcrusher SZ-bar",
+    "category": "Arms",
+    "muscles": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Bench",
+      "SZ-Bar"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/84_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/84_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-185",
+    "name": "Squat Jumps",
+    "category": "Legs",
+    "muscles": [
+      "Quads"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/185_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/185_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-237",
+    "name": "Rear Delt Raises",
+    "category": "Shoulders",
+    "muscles": [],
+    "equipment": [
+      "Dumbbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/237_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/237_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-377",
+    "name": "Seated Hip Adduction",
+    "category": "Legs",
+    "muscles": [
+      "Glutes"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/377_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/377_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-394",
+    "name": "Facepull",
+    "category": "Shoulders",
+    "muscles": [
+      "Trapezius"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/394_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/394_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-801",
+    "name": "Row",
+    "category": "Back",
+    "muscles": [
+      "Lats",
+      "Trapezius",
+      "Quads"
+    ],
+    "equipment": [
+      "Barbell",
+      "Dumbbell",
+      "Pull-up bar"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/801_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/801_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-194",
+    "name": "Cross-Bench Dumbbell Pullovers",
+    "category": "Chest",
+    "muscles": [
+      "Lats",
+      "Chest",
+      "Serratus anterior"
+    ],
+    "equipment": [
+      "Dumbbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/194_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-238",
+    "name": "Plank",
+    "category": "Abs",
+    "muscles": [
+      "Obliquus externus abdominis",
+      "Abs",
+      "Biceps",
+      "Quads",
+      "Triceps"
+    ],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/238_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/238_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-1080",
+    "name": "Incline Bench Reverse Fly",
+    "category": "Back",
+    "muscles": [
+      "Shoulders",
+      "Trapezius"
+    ],
+    "equipment": [
+      "Dumbbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1080_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-203",
+    "name": "Wall Pushup",
+    "category": "Arms",
+    "muscles": [
+      "Shoulders",
+      "Chest",
+      "Triceps",
+      "Glutes",
+      "Abs",
+      "Serratus anterior",
+      "Trapezius"
+    ],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/203_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/203_secondary.png",
+        "/assets/exercises/203_secondary_1.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-256",
+    "name": "Military Press mit SZ-Bar",
+    "category": "Shoulders",
+    "muscles": [],
+    "equipment": [
+      "SZ-Bar"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/256_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1105",
+    "name": "Leg Extension",
+    "category": "Legs",
+    "muscles": [
+      "Quads",
+      "Hamstrings"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/1105_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-116",
+    "name": "Good Mornings",
+    "category": "Legs",
+    "muscles": [
+      "Hamstrings"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/116_main.png"
+      ],
+      "secondary": [
+        "/assets/exercises/116_secondary.png",
+        "/assets/exercises/116_secondary_1.png",
+        "/assets/exercises/116_secondary_2.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-94",
+    "name": "Crunches on Machine",
+    "category": "Abs",
+    "muscles": [
+      "Abs"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/94_main.png",
+        "/assets/exercises/94_main_1.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-104",
+    "name": "Calf Raises on Hackenschmitt Machine",
+    "category": "Calves",
+    "muscles": [
+      "Calves",
+      "Soleus"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/104_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-389",
+    "name": "Low Box Squat - Wide Stance",
+    "category": "Legs",
+    "muscles": [
+      "Glutes",
+      "Quads"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/389_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-81",
+    "name": "Biceps Curls With Dumbbell",
+    "category": "Arms",
+    "muscles": [
+      "Biceps",
+      "Brachialis"
+    ],
+    "equipment": [
+      "Dumbbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/81_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-126",
+    "name": "Leg Raises, Standing",
+    "category": "Abs",
+    "muscles": [
+      "Abs",
+      "Serratus anterior"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/126_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-170",
+    "name": "Splinter Sit-ups",
+    "category": "Abs",
+    "muscles": [
+      "Obliquus externus abdominis"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/170_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1188",
+    "name": "Reverse Nordic Curl",
+    "category": "Legs",
+    "muscles": [
+      "Quads",
+      "Glutes",
+      "Abs"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/1188_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1190",
+    "name": "Incline Skull Crush",
+    "category": "Arms",
+    "muscles": [
+      "Triceps"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/1190_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1192",
+    "name": "Reverse Preacher Curl (Close Grip)",
+    "category": "Arms",
+    "muscles": [
+      "Biceps"
+    ],
+    "equipment": [
+      "SZ-Bar"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1192_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1193",
+    "name": "Reverse EZ Bar Cable Curls",
+    "category": "Arms",
+    "muscles": [
+      "Biceps"
+    ],
+    "equipment": [
+      "SZ-Bar"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1193_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1194",
+    "name": "BUS DRIVERS",
+    "category": "Shoulders",
+    "muscles": [
+      "Shoulders"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/1194_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1198",
+    "name": "T-Bar row",
+    "category": "Back",
+    "muscles": [
+      "Lats",
+      "Trapezius"
+    ],
+    "equipment": [
+      "Barbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1198_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1239",
+    "name": "TRX Rows",
+    "category": "Abs",
+    "muscles": [
+      "Shoulders",
+      "Biceps",
+      "Lats"
+    ],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1239_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-416",
+    "name": "Crunches With Legs Up",
+    "category": "Abs",
+    "muscles": [
+      "Abs",
+      "Obliquus externus abdominis"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/416_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1283",
+    "name": "one-handed kettlebell curls",
+    "category": "Arms",
+    "muscles": [
+      "Biceps"
+    ],
+    "equipment": [
+      "Kettlebell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1283_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-302",
+    "name": "Side to Side Push Ups",
+    "category": "Chest",
+    "muscles": [
+      "Shoulders",
+      "Obliquus externus abdominis",
+      "Chest",
+      "Triceps"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/302_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1296",
+    "name": "commando pull-ups",
+    "category": "Abs",
+    "muscles": [
+      "Shoulders",
+      "Biceps",
+      "Lats",
+      "Trapezius"
+    ],
+    "equipment": [
+      "Pull-up bar"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1296_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-810",
+    "name": "Jumping Jacks",
+    "category": "Legs",
+    "muscles": [
+      "Quads"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/810_main.png",
+        "/assets/exercises/810_main_1.png",
+        "/assets/exercises/810_main_2.png",
+        "/assets/exercises/810_main_3.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-791",
+    "name": "Leg Raise",
+    "category": "Legs",
+    "muscles": [
+      "Obliquus externus abdominis",
+      "Abs"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/791_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-361",
+    "name": "Pike Push Ups",
+    "category": "Arms",
+    "muscles": [
+      "Chest",
+      "Triceps"
+    ],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/361_main.png",
+        "/assets/exercises/361_main_1.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1048",
+    "name": "Calf raises, one legged",
+    "category": "Calves",
+    "muscles": [
+      "Calves"
+    ],
+    "equipment": [],
+    "images": {
+      "main": [
+        "/assets/exercises/1048_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1544",
+    "name": "Lunges",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1544_main.png",
+        "/assets/exercises/1544_main_1.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1559",
+    "name": "Push-up rotations",
+    "category": "Arms",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1559_main.png",
+        "/assets/exercises/1559_main_1.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1574",
+    "name": "Side split squats left",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1574_main.png",
+        "/assets/exercises/1574_main_1.png",
+        "/assets/exercises/1574_main_2.png",
+        "/assets/exercises/1574_main_3.png"
+      ],
+      "secondary": [
+        "/assets/exercises/1574_secondary.png",
+        "/assets/exercises/1574_secondary_1.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-1588",
+    "name": "Side split squats right",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1588_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1602",
+    "name": "Bulgarian split squats left",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1602_main.png",
+        "/assets/exercises/1602_main_1.png"
+      ],
+      "secondary": [
+        "/assets/exercises/1602_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-1616",
+    "name": "Bulgarian split squats right",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1616_main.png",
+        "/assets/exercises/1616_main_1.png",
+        "/assets/exercises/1616_main_2.png",
+        "/assets/exercises/1616_main_3.png",
+        "/assets/exercises/1616_main_4.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-795",
+    "name": "Squat Thrust",
+    "category": "Legs",
+    "muscles": [
+      "Glutes",
+      "Quads",
+      "Abs",
+      "Soleus"
+    ],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/795_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-146",
+    "name": "Fly With Dumbbells, Decline Bench",
+    "category": "Chest",
+    "muscles": [
+      "Chest"
+    ],
+    "equipment": [
+      "Dumbbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/146_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-387",
+    "name": "Wall Squat",
+    "category": "Legs",
+    "muscles": [
+      "Hamstrings",
+      "Quads"
+    ],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/387_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-279",
+    "name": "Tricep Dumbbell Kickback",
+    "category": "Arms",
+    "muscles": [
+      "Triceps"
+    ],
+    "equipment": [
+      "Dumbbell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/279_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1058",
+    "name": "Front Pull narrow",
+    "category": "Back",
+    "muscles": [
+      "Lats",
+      "Biceps",
+      "Brachialis"
+    ],
+    "equipment": [
+      "Barbell",
+      "SZ-Bar"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1058_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1630",
+    "name": "Kneeling kickbacks",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1630_main.png",
+        "/assets/exercises/1630_main_1.png",
+        "/assets/exercises/1630_main_2.png",
+        "/assets/exercises/1630_main_3.png",
+        "/assets/exercises/1630_main_4.png",
+        "/assets/exercises/1630_main_5.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1643",
+    "name": "Split squats left",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1643_main.png",
+        "/assets/exercises/1643_main_1.png",
+        "/assets/exercises/1643_main_2.png",
+        "/assets/exercises/1643_main_3.png",
+        "/assets/exercises/1643_main_4.png",
+        "/assets/exercises/1643_main_5.png",
+        "/assets/exercises/1643_main_6.png",
+        "/assets/exercises/1643_main_7.png",
+        "/assets/exercises/1643_main_8.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1657",
+    "name": "Split squats right",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1657_main.png",
+        "/assets/exercises/1657_main_1.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1702",
+    "name": "Backward arm circles",
+    "category": "Arms",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1702_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1715",
+    "name": "Mountain climbers",
+    "category": "Chest",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1715_main.png",
+        "/assets/exercises/1715_main_1.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1731",
+    "name": "4-count burpees",
+    "category": "Chest",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1731_main.png",
+        "/assets/exercises/1731_main_1.png",
+        "/assets/exercises/1731_main_2.png",
+        "/assets/exercises/1731_main_3.png",
+        "/assets/exercises/1731_main_4.png",
+        "/assets/exercises/1731_main_5.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1742",
+    "name": "No push-up burpees",
+    "category": "Chest",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1742_main.png",
+        "/assets/exercises/1742_main_1.png",
+        "/assets/exercises/1742_main_2.png",
+        "/assets/exercises/1742_main_3.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1803",
+    "name": "Kettlebell deadlifts",
+    "category": "Back",
+    "muscles": [],
+    "equipment": [
+      "Kettlebell"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1803_main.png",
+        "/assets/exercises/1803_main_1.png"
+      ],
+      "secondary": [
+        "/assets/exercises/1803_secondary.png"
+      ]
+    }
+  },
+  {
+    "id": "wger-1826",
+    "name": "Backward shoulder rotation",
+    "category": "Back",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1826_main.png",
+        "/assets/exercises/1826_main_1.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1838",
+    "name": "Chin tuck",
+    "category": "Back",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1838_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1847",
+    "name": "Head turns",
+    "category": "Shoulders",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1847_main.png",
+        "/assets/exercises/1847_main_1.png",
+        "/assets/exercises/1847_main_2.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1860",
+    "name": "Left neck stretch",
+    "category": "Shoulders",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1860_main.png",
+        "/assets/exercises/1860_main_1.png",
+        "/assets/exercises/1860_main_2.png",
+        "/assets/exercises/1860_main_3.png",
+        "/assets/exercises/1860_main_4.png",
+        "/assets/exercises/1860_main_5.png",
+        "/assets/exercises/1860_main_6.png",
+        "/assets/exercises/1860_main_7.png",
+        "/assets/exercises/1860_main_8.png",
+        "/assets/exercises/1860_main_9.png",
+        "/assets/exercises/1860_main_10.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1872",
+    "name": "Right neck stretch",
+    "category": "Shoulders",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1872_main.png",
+        "/assets/exercises/1872_main_1.png",
+        "/assets/exercises/1872_main_2.png",
+        "/assets/exercises/1872_main_3.png",
+        "/assets/exercises/1872_main_4.png",
+        "/assets/exercises/1872_main_5.png",
+        "/assets/exercises/1872_main_6.png",
+        "/assets/exercises/1872_main_7.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1884",
+    "name": "Back neck stretch",
+    "category": "Back",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1884_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1896",
+    "name": "Front neck stretch",
+    "category": "Back",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1896_main.png",
+        "/assets/exercises/1896_main_1.png",
+        "/assets/exercises/1896_main_2.png",
+        "/assets/exercises/1896_main_3.png",
+        "/assets/exercises/1896_main_4.png",
+        "/assets/exercises/1896_main_5.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1917",
+    "name": "Neck half circles",
+    "category": "Back",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1917_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1923",
+    "name": "Side plank right",
+    "category": "Abs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1923_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-570",
+    "name": "Sumo Squats",
+    "category": "Legs",
+    "muscles": [
+      "Glutes",
+      "Quads"
+    ],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/570_main.png"
+      ],
+      "secondary": []
+    }
+  },
+  {
+    "id": "wger-1938",
+    "name": "Pistol squats right",
+    "category": "Legs",
+    "muscles": [],
+    "equipment": [
+      "none (bodyweight exercise)"
+    ],
+    "images": {
+      "main": [
+        "/assets/exercises/1938_main.png"
+      ],
+      "secondary": []
+    }
+  }
+]
