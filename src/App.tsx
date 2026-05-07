@@ -1,16 +1,16 @@
 import React, { useState, useEffect, createContext, useContext, useMemo } from 'react';
-import { 
-  Dumbbell, 
-  History, 
-  Settings, 
-  Plus, 
-  Trash2, 
-  ChevronRight, 
+import {
+  Dumbbell,
+  History,
+  Settings,
+  Plus,
+  Trash2,
+  ChevronRight,
   ChevronDown,
-  Play, 
-  CheckCircle2, 
-  Mic, 
-  Brain, 
+  Play,
+  CheckCircle2,
+  Mic,
+  Brain,
   User as UserIcon,
   Calendar,
   Moon,
@@ -27,33 +27,33 @@ import {
   Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  format, 
-  subMonths, 
-  addMonths, 
-  startOfMonth, 
-  endOfMonth, 
-  eachDayOfInterval, 
+import {
+  format,
+  subMonths,
+  addMonths,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
   isSameDay,
   isAfter,
   startOfWeek,
   startOfYear
 } from 'date-fns';
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut, 
-  User 
+import {
+  signInWithPopup,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signOut,
+  User
 } from 'firebase/auth';
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  addDoc, 
-  serverTimestamp, 
-  orderBy, 
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  addDoc,
+  serverTimestamp,
+  orderBy,
   limit,
   doc,
   getDoc,
@@ -66,7 +66,13 @@ import { auth, db, handleFirestoreError, OperationType, testFirestoreConnection 
 import { cn } from './lib/utils';
 import { WorkoutLog, Routine, UserProfile, WorkoutExercise, Set as WorkoutSet, ChatMessage, ChatSummary, Conversation } from './types';
 import { EXERCISES } from './constants';
-import { GoogleGenAI, Type } from '@google/genai';
+import OpenAI from 'openai';
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
+import { StateGraph, Annotation } from "@langchain/langgraph";
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
+import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import {
   LineChart,
   Line,
@@ -136,7 +142,7 @@ const LoginScreen = () => {
           Personalized muscle intelligence for the modern athlete.
         </p>
       </motion.div>
-      
+
       <button
         onClick={signIn}
         className="w-full max-w-[280px] bg-white text-black font-bold py-4 rounded-full flex items-center justify-center space-x-3 hover:bg-zinc-200 transition-colors"
@@ -159,19 +165,19 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
   const allEquipmentItems = Array.from(new Set(EXERCISES.flatMap(e => e.equipment_list))).sort();
 
   const toggleMuscle = (m: string) => {
-    setSelectedMuscleGroups(prev => 
+    setSelectedMuscleGroups(prev =>
       prev.includes(m) ? prev.filter(item => item !== m) : [...prev, m]
     );
   };
 
   const toggleEquipment = (e: string) => {
-    setSelectedEquipmentList(prev => 
+    setSelectedEquipmentList(prev =>
       prev.includes(e) ? prev.filter(item => item !== e) : [...prev, e]
     );
   };
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
@@ -179,10 +185,10 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
     >
       <header className="flex items-center justify-between p-4 border-b border-zinc-900">
         <button onClick={onCancel} className="p-2 text-zinc-400">
-           <ChevronLeft className="w-6 h-6" />
+          <ChevronLeft className="w-6 h-6" />
         </button>
         <h2 className="text-lg font-bold">New Exercise</h2>
-        <button 
+        <button
           onClick={() => {
             if (name && selectedMuscleGroups.length > 0 && selectedEquipmentList.length > 0) {
               onSave({
@@ -206,8 +212,8 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
       <div className="flex-1 overflow-y-auto no-scrollbar p-6 space-y-8">
         <div className="space-y-2">
           <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Exercise Name</label>
-          <input 
-            type="text" 
+          <input
+            type="text"
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder="e.g. Incline Machine Press"
@@ -276,7 +282,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
   };
 
   const workoutDays = workouts.map(w => format(new Date(w.date.seconds * 1000), 'yyyy-MM-dd'));
-  
+
   const getDaysInMonth = (date: Date) => {
     const start = startOfMonth(date);
     const end = endOfMonth(date);
@@ -298,13 +304,13 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
           </div>
         </div>
         <div className="flex space-x-2">
-          <button 
+          <button
             onClick={() => setShowCalendar(true)}
             className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl hover:border-[#CCFF00]/50 transition-colors"
           >
             <Calendar className="w-5 h-5 text-[#CCFF00]" />
           </button>
-          <button 
+          <button
             onClick={() => setIsEditing(!isEditing)}
             className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl"
           >
@@ -318,7 +324,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
         <div className="bg-[#1A1A1A] p-6 rounded-3xl border border-zinc-800 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">My Vision & Goal</h3>
-            <button 
+            <button
               disabled={isRefining}
               onClick={async () => {
                 if (!profile?.aim) {
@@ -327,24 +333,33 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
                 }
                 setIsRefining(true);
                 try {
-                  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+                  const model = new ChatOpenAI({
+                    modelName: "gpt-5.4-mini",
+                    openAIApiKey: process.env.OPENAI_API_KEY,
+                    configuration: { dangerouslyAllowBrowser: true }
+                  });
+
                   const prompt = `Act as an expert fitness strategist. Refine the following user's fitness vision and aim into a professional, high-impact, and motivating primary goal.
                   
                   User's vision and aim: "${profile.aim}"
+                  Current Goal: "${profile.goal || 'None'}"
                   
-                  Requirements:
-                  - Concise (max 8 words)
-                  - Action-oriented
-                  - Professional terminology
+                  Rules:
+                  - Keep it under 10 words
+                  - Use powerful, athletic language
                   - Direct alignment with their motivation
                   
                   Refined Primary Goal:`;
-                  
-                  const result = await ai.models.generateContent({
-                    model: "gemini-3-flash-preview",
-                    contents: prompt
+
+                  const response = await model.invoke(prompt, {
+                    callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" ? [
+                      new LangChainTracer({
+                        projectName: process.env.LANGCHAIN_PROJECT,
+                        apiKey: process.env.LANGCHAIN_API_KEY,
+                      })
+                    ] : []
                   });
-                  const refined = result.text || "";
+                  const refined = response.content.toString() || "";
                   onUpdate({ goal: refined.trim().replace(/^"|"$/g, '') });
                 } catch (e: any) {
                   console.error("AI Refinement Error:", e);
@@ -366,7 +381,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
             <div>
               <p className="text-[10px] text-zinc-600 uppercase font-mono mb-1">Primary Goal</p>
               {isEditing ? (
-                <input 
+                <input
                   className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white"
                   value={profile?.goal || ''}
                   placeholder="e.g. Hypertrophy & Strength"
@@ -379,7 +394,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
             <div>
               <p className="text-[10px] text-zinc-600 uppercase font-mono mb-1">Detailed Aim</p>
               {isEditing ? (
-                <textarea 
+                <textarea
                   className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white text-xs resize-none h-24"
                   value={profile?.aim || ''}
                   placeholder="Describe what you want to achieve, your motivation, and your ultimate vision..."
@@ -418,7 +433,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
                       {m.options?.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   ) : (
-                    <input 
+                    <input
                       type="number"
                       className="bg-zinc-900 border border-zinc-800 px-2 py-1 rounded w-full text-white font-bold"
                       value={profile?.[m.key as keyof UserProfile] || ''}
@@ -427,7 +442,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
                   )
                 ) : (
                   <p className="text-lg font-bold">
-                    {profile?.[m.key as keyof UserProfile] || '-'} 
+                    {profile?.[m.key as keyof UserProfile] || '-'}
                     {m.unit && <span className="text-[10px] text-zinc-500 ml-1 uppercase">{m.unit}</span>}
                   </p>
                 )}
@@ -441,7 +456,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
             <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">Google Sheets</h3>
             <div className="flex items-center space-x-2">
               {sheets.connected && (
-                <button 
+                <button
                   onClick={sheets.disconnect}
                   className="text-[10px] text-zinc-600 hover:text-red-500 uppercase font-mono tracking-tighter"
                 >
@@ -451,16 +466,16 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
               <div className={cn("w-2 h-2 rounded-full", sheets.connected ? "bg-[#CCFF00]" : "bg-red-500")} />
             </div>
           </div>
-          
+
           {!sheets.connected ? (
-            <button 
+            <button
               onClick={sheets.connect}
               className="w-full py-3 bg-white text-black font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-zinc-200 transition-all"
             >
               Connect Google Sheets
             </button>
           ) : !sheets.spreadsheetId ? (
-            <button 
+            <button
               disabled={isCreatingSheet}
               onClick={handleCreateSheet}
               className="w-full py-3 bg-[#CCFF00] text-black font-bold rounded-xl text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
@@ -473,9 +488,9 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
                 <p className="text-[10px] text-zinc-500 font-mono uppercase mb-1">Spreadsheet Connected</p>
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-mono text-zinc-300 truncate mr-4">ID: {sheets.spreadsheetId.slice(0, 8)}...{sheets.spreadsheetId.slice(-4)}</p>
-                  <a 
-                    href={`https://docs.google.com/spreadsheets/d/${sheets.spreadsheetId}`} 
-                    target="_blank" 
+                  <a
+                    href={`https://docs.google.com/spreadsheets/d/${sheets.spreadsheetId}`}
+                    target="_blank"
                     rel="noopener noreferrer"
                     className="text-[#CCFF00] hover:underline text-[10px] uppercase font-bold"
                   >
@@ -492,7 +507,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
       {/* Calendar Overlay */}
       <AnimatePresence>
         {showCalendar && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
@@ -506,17 +521,17 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
               </div>
               <div className="p-6">
                 <div className="grid grid-cols-7 gap-2 mb-4">
-                  {['S','M','T','W','T','F','S'].map((d, i) => (
+                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
                     <div key={i} className="text-center text-[10px] text-zinc-600 font-bold">{d}</div>
                   ))}
                   {days.map((day, i) => {
                     const dateStr = format(day, 'yyyy-MM-dd');
                     const isToday = isSameDay(day, new Date());
                     const workedOut = workoutDays.includes(dateStr);
-                    
+
                     return (
-                      <div 
-                        key={i} 
+                      <div
+                        key={i}
                         className={cn(
                           "aspect-square flex flex-col items-center justify-center rounded-xl relative",
                           isToday && "ring-1 ring-[#CCFF00]"
@@ -532,7 +547,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
                     );
                   })}
                 </div>
-                <button 
+                <button
                   onClick={() => setShowCalendar(false)}
                   className="w-full bg-[#CCFF00] text-black font-bold py-3 rounded-2xl mt-4"
                 >
@@ -544,7 +559,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut }: { profile: U
         )}
       </AnimatePresence>
 
-      <button 
+      <button
         onClick={onSignOut}
         className="text-zinc-600 font-bold flex items-center justify-center w-full py-4 border border-zinc-800 rounded-3xl hover:bg-red-500/10 hover:text-red-500 transition-colors"
       >
@@ -559,7 +574,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
   const intensity = workout.intensity || Math.round(workout.totalVolume / (workout.duration / 60 || 1));
 
   return (
-    <div 
+    <div
       onClick={() => setIsExpanded(!isExpanded)}
       className={cn(
         "bg-[#1A1A1A] rounded-2xl border transition-all cursor-pointer overflow-hidden",
@@ -581,7 +596,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
                 const workoutDate = format(new Date(workout.date.seconds * 1000), 'EEEE, MMMM d');
                 const exercisesList = workout.exercises.map(ex => `- ${ex.name}: ${ex.sets.length} sets`).join('\n');
                 const text = `I just crushed a workout on FitAI!\n\nWorkout: ${workout.name}\nDate: ${workoutDate}\nTotal Volume: ${workout.totalVolume.toLocaleString()} kg\nExercises:\n${exercisesList}\nDuration: ${Math.floor(workout.duration / 60)} mins\n\n#FitAI #Fitness #Workout`;
-                
+
                 if (navigator.share) {
                   navigator.share({
                     title: 'My FitAI Workout',
@@ -609,7 +624,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
             )}
           </div>
         </div>
- 
+
         <div className="flex items-center space-x-4 py-2 border-y border-zinc-800/30">
           <div className="flex flex-col">
             <span className="text-[9px] text-zinc-500 uppercase font-mono">Intensity Score</span>
@@ -624,7 +639,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
 
         <AnimatePresence>
           {isExpanded && (
-            <motion.div 
+            <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
@@ -645,7 +660,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {ex.sets.map((set, sIdx) => (
                         <div key={sIdx} className="bg-zinc-900/50 border border-zinc-800 p-2 rounded-lg flex flex-col justify-center">
-                          <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-tighter">Set {sIdx+1}</span>
+                          <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-tighter">Set {sIdx + 1}</span>
                           <span className="text-xs font-bold text-zinc-400">
                             {set.weight} <span className="text-[10px] font-normal opacity-50">kg</span> × {set.reps} <span className="text-[10px] font-normal opacity-50">reps</span>
                           </span>
@@ -663,8 +678,8 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
   );
 };
 
-const Dashboard = ({ workouts, profile, onUpdateProfile }: { 
-  workouts: WorkoutLog[], 
+const Dashboard = ({ workouts, profile, onUpdateProfile }: {
+  workouts: WorkoutLog[],
   profile: UserProfile | null,
   onUpdateProfile: (data: Partial<UserProfile>) => Promise<any>
 }) => {
@@ -677,7 +692,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
 
   const weightData = useMemo(() => {
     if (!profile?.weightHistory) return [];
-    
+
     const now = new Date();
     return profile.weightHistory.filter(wh => {
       const date = new Date(wh.date);
@@ -705,7 +720,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
       const weight = parseFloat(newWeight);
       const today = new Date().toISOString();
       const newHistory = [...(profile?.weightHistory || []), { date: today, weight }];
-      await onUpdateProfile({ 
+      await onUpdateProfile({
         weight,
         weightHistory: newHistory
       });
@@ -719,7 +734,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
     const now = new Date();
     return workouts.filter(w => {
       const workoutDate = new Date(w.date.seconds * 1000);
-      
+
       if (filterType === 'all') return true;
       if (filterType === 'week') return isAfter(workoutDate, startOfWeek(now));
       if (filterType === 'month') return isAfter(workoutDate, startOfMonth(now));
@@ -762,10 +777,10 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
       w.exercises.forEach(ex => {
         const exerciseDef = EXERCISES.find(e => e.id === ex.exerciseId || e.name === ex.name);
         const volume = ex.sets.reduce((acc, s) => acc + (s.weight * s.reps), 0);
-        
+
         // Use muscle_groups if available, fallback to legacy muscle field
-        const groups = (exerciseDef?.muscle_groups && exerciseDef.muscle_groups.length > 0) 
-          ? exerciseDef.muscle_groups 
+        const groups = (exerciseDef?.muscle_groups && exerciseDef.muscle_groups.length > 0)
+          ? exerciseDef.muscle_groups
           : [exerciseDef?.muscle || ''];
 
         groups.forEach(groupRaw => {
@@ -809,13 +824,13 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
         <div>
           <h2 className="text-3xl font-bold">Progress</h2>
           <div className="flex items-center space-x-2 mt-1">
-            <button 
+            <button
               onClick={() => setView('chart')}
               className={cn("text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded", view === 'chart' ? "bg-[#CCFF00] text-black" : "text-zinc-500")}
             >
               Chart
             </button>
-            <button 
+            <button
               onClick={() => setView('matrix')}
               className={cn("text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded", view === 'matrix' ? "bg-[#CCFF00] text-black" : "text-zinc-500")}
             >
@@ -825,7 +840,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
         </div>
         <div className="flex items-center space-x-2">
           {view === 'matrix' && (
-            <button 
+            <button
               onClick={() => setShowTimeMatrix(!showTimeMatrix)}
               className={cn(
                 "px-3 py-1 rounded-full text-[10px] font-bold transition-all border",
@@ -850,8 +865,8 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
                 onClick={() => setFilterType(type)}
                 className={cn(
                   "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all",
-                  filterType === type 
-                    ? "bg-[#CCFF00] text-black" 
+                  filterType === type
+                    ? "bg-[#CCFF00] text-black"
                     : "text-zinc-500 hover:text-zinc-300"
                 )}
               >
@@ -866,15 +881,15 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
         </div>
 
         {filterType === 'custom' && (
-          <motion.div 
+          <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             className="flex items-center space-x-2 pt-2 border-t border-zinc-800"
           >
             <div className="flex-1">
               <label className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">Start</label>
-              <input 
-                type="date" 
+              <input
+                type="date"
                 value={customRange.start}
                 onChange={(e) => setCustomRange(prev => ({ ...prev, start: e.target.value }))}
                 className="w-full bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#CCFF00]/50"
@@ -882,8 +897,8 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
             </div>
             <div className="flex-1">
               <label className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">End</label>
-              <input 
-                type="date" 
+              <input
+                type="date"
                 value={customRange.end}
                 onChange={(e) => setCustomRange(prev => ({ ...prev, end: e.target.value }))}
                 className="w-full bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#CCFF00]/50"
@@ -903,12 +918,12 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
               <AreaChart data={data}>
                 <defs>
                   <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#CCFF00" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#CCFF00" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#CCFF00" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#CCFF00" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis dataKey="date" stroke="#525252" fontSize={10} axisLine={false} tickLine={false} />
-                <Tooltip 
+                <Tooltip
                   contentStyle={{ background: '#0A0A0A', border: '1px solid #262626', borderRadius: '12px' }}
                   itemStyle={{ color: '#CCFF00' }}
                 />
@@ -924,7 +939,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
                 <span className="text-xl font-bold">{profile?.weight || '-'} <span className="text-[10px] text-zinc-500">kg</span></span>
               </div>
               <div className="flex items-center space-x-2">
-                <input 
+                <input
                   type="number"
                   placeholder="Today's kg"
                   value={newWeight}
@@ -941,7 +956,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
                 </button>
               </div>
             </div>
-            
+
             <div className="h-[180px]">
               {weightData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -949,16 +964,16 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#262626" />
                     <XAxis dataKey="date" stroke="#525252" fontSize={8} axisLine={false} tickLine={false} />
                     <YAxis hide domain={['dataMin - 5', 'dataMax + 5']} />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ background: '#0A0A0A', border: '1px solid #262626', borderRadius: '12px', fontSize: '10px' }}
                       itemStyle={{ color: '#CCFF00' }}
                     />
-                    <Line 
-                      type="monotone" 
-                      dataKey="weight" 
-                      stroke="#CCFF00" 
-                      strokeWidth={2} 
-                      dot={{ fill: '#CCFF00', r: 3 }} 
+                    <Line
+                      type="monotone"
+                      dataKey="weight"
+                      stroke="#CCFF00"
+                      strokeWidth={2}
+                      dot={{ fill: '#CCFF00', r: 3 }}
                       activeDot={{ r: 5, stroke: '#CCFF00', strokeWidth: 2 }}
                     />
                   </LineChart>
@@ -986,7 +1001,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
               </thead>
               <tbody className="divide-y divide-zinc-800/50">
                 {workouts.slice(0, 10).map((w, i) => {
-                  const totalActiveTime = w.exercises.reduce((acc, ex) => 
+                  const totalActiveTime = w.exercises.reduce((acc, ex) =>
                     acc + ex.sets.reduce((sAcc, s) => sAcc + (s.timeTaken || 0), 0), 0
                   );
                   return (
@@ -1060,8 +1075,8 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
   );
 };
 
-const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: { 
-  routines: Routine[], 
+const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
+  routines: Routine[],
   onStart: (r: Routine) => void,
   onEdit: (r: Routine) => void,
   onCreate: () => void,
@@ -1074,7 +1089,7 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
           <h2 className="text-3xl font-bold">Library</h2>
           <p className="text-zinc-500 font-mono text-xs uppercase">Your Routines</p>
         </div>
-        <button 
+        <button
           onClick={onCreate}
           className="bg-[#CCFF00] text-black p-2 rounded-full shadow-lg shadow-[#CCFF00]/10"
         >
@@ -1087,7 +1102,7 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
           <div className="bg-[#1A1A1A] p-12 rounded-3xl border border-dashed border-zinc-800 text-center flex flex-col items-center">
             <Dumbbell className="w-12 h-12 text-zinc-700 mb-4" />
             <p className="text-zinc-500 text-sm mb-6">No routines found. Create your first split to speed up your logs.</p>
-            <button 
+            <button
               onClick={onCreate}
               className="bg-white text-black font-bold px-8 py-3 rounded-full text-sm hover:opacity-90 transition-all"
             >
@@ -1096,10 +1111,10 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
           </div>
         ) : (
           routines.map((r, i) => (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              key={r.id || i} 
+              key={r.id || i}
               className="bg-[#1A1A1A] p-5 rounded-2xl border border-zinc-800 space-y-4 group hover:border-[#CCFF00]/30 transition-all relative overflow-hidden"
             >
               <div className="flex items-start justify-between">
@@ -1108,7 +1123,7 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
                   <p className="text-xs text-zinc-500 line-clamp-1">{r.exercises.map(e => e.name).join(', ')}</p>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <button 
+                  <button
                     onClick={(e) => {
                       e.stopPropagation();
                       if (r.id) onDelete(r.id);
@@ -1118,7 +1133,7 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
-                  <button 
+                  <button
                     onClick={(e) => {
                       e.stopPropagation();
                       onStart(r);
@@ -1180,21 +1195,21 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
     });
     return Array.from(muscles).sort();
   }, [allExercises]);
-  
+
   const filtered = useMemo(() => allExercises.filter(e => {
     const name = e.name || '';
     const muscle = e.muscle || '';
     const muscleGroups = e.muscle_groups || [muscle];
-    const equipList = (e.equipment_list || [e.equipment || '']).map(it => 
+    const equipList = (e.equipment_list || [e.equipment || '']).map(it =>
       (it.toLowerCase().includes('bodyweight') || it.toLowerCase() === 'none') ? 'Bodyweight' : it
     );
 
-    const matchSearch = name.toLowerCase().includes(search.toLowerCase()) || 
-                        muscleGroups.some(m => m.toLowerCase().includes(search.toLowerCase()));
+    const matchSearch = name.toLowerCase().includes(search.toLowerCase()) ||
+      muscleGroups.some(m => m.toLowerCase().includes(search.toLowerCase()));
 
     const matchEquip = selectedEquip === "All Equipment" || equipList.includes(selectedEquip);
     const matchMuscle = selectedMuscle === "All Muscles" || muscleGroups.includes(selectedMuscle);
-    
+
     return matchSearch && matchEquip && matchMuscle;
   }).sort((a, b) => a.name.localeCompare(b.name)), [allExercises, search, selectedEquip, selectedMuscle]);
 
@@ -1216,7 +1231,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
           <ChevronLeft className="w-6 h-6" />
         </button>
         <h2 className="text-lg font-bold">Exercises</h2>
-        <button 
+        <button
           onClick={() => setShowCustomModal(true)}
           className="p-2 text-[#CCFF00]"
           title="Add Custom Exercise"
@@ -1228,9 +1243,9 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
       <div className="p-4 space-y-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-          <input 
-            type="text" 
-            placeholder="Search exercise" 
+          <input
+            type="text"
+            placeholder="Search exercise"
             className="w-full bg-[#1A1A1A] border-none rounded-lg py-2.5 pl-10 pr-4 text-sm focus:ring-1 focus:ring-[#CCFF00]"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -1238,7 +1253,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <button 
+          <button
             onClick={() => setActiveFilter('equip')}
             className={cn(
               "py-2.5 rounded-md text-[10px] font-bold flex items-center justify-center space-x-1 border transition-all",
@@ -1248,7 +1263,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             <span className="truncate max-w-[80px]">{selectedEquip}</span>
             <ChevronDown className="w-3 h-3" />
           </button>
-          <button 
+          <button
             onClick={() => setActiveFilter('muscle')}
             className={cn(
               "py-2.5 rounded-md text-[10px] font-bold flex items-center justify-center space-x-1 border transition-all",
@@ -1263,9 +1278,9 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
 
       <AnimatePresence>
         {showCustomModal && (
-          <CustomExerciseModal 
-            onSave={handleSaveCustom} 
-            onCancel={() => setShowCustomModal(false)} 
+          <CustomExerciseModal
+            onSave={handleSaveCustom}
+            onCancel={() => setShowCustomModal(false)}
           />
         )}
       </AnimatePresence>
@@ -1276,8 +1291,8 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             <h3 className="text-zinc-500 text-xs font-bold mb-4 uppercase tracking-wider">Recent Exercises</h3>
             <div className="divide-y divide-zinc-900">
               {recentExercises.map((e) => (
-                <button 
-                  key={`recent-${e.id}`} 
+                <button
+                  key={`recent-${e.id}`}
                   onClick={() => onSelect(e)}
                   className="w-full py-4 text-left flex items-center justify-between group"
                 >
@@ -1300,8 +1315,8 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
           </h3>
           <div className="divide-y divide-zinc-900">
             {filtered.map((e) => (
-              <button 
-                key={e.id} 
+              <button
+                key={e.id}
                 onClick={() => onSelect(e)}
                 className="w-full py-4 text-left flex items-center justify-between group"
               >
@@ -1309,8 +1324,8 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
                   <div>
                     <div className="font-bold text-[15px]">{e.name}</div>
                     <div className="text-[10px] text-zinc-500 uppercase font-mono tracking-tighter">
-                      {e.muscle_groups && e.muscle_groups.length > 0 ? e.muscle_groups.join(', ') : e.muscle} 
-                      <span className="mx-1">•</span> 
+                      {e.muscle_groups && e.muscle_groups.length > 0 ? e.muscle_groups.join(', ') : e.muscle}
+                      <span className="mx-1">•</span>
                       {(e.equipment_list && e.equipment_list.length > 0 ? e.equipment_list[0] : (e.equipment || 'Bodyweight'))}
                     </div>
                   </div>
@@ -1325,7 +1340,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
           <div className="py-20 text-center flex flex-col items-center">
             <Info className="w-8 h-8 text-zinc-800 mb-2" />
             <p className="text-zinc-500 italic">No matches found for this filter.</p>
-            <button 
+            <button
               onClick={() => { setSelectedEquip("All Equipment"); setSelectedMuscle("All Muscles"); setSearch(''); }}
               className="mt-4 text-[#CCFF00] text-sm font-bold"
             >
@@ -1338,14 +1353,14 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
       {/* Filter Selection Overlay */}
       <AnimatePresence>
         {activeFilter && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex items-end justify-center"
             onClick={() => setActiveFilter(null)}
           >
-            <motion.div 
+            <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
@@ -1355,7 +1370,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                 <h3 className="text-lg font-bold">Select {activeFilter === 'equip' ? 'Equipment' : 'Muscle Group'}</h3>
-                <button 
+                <button
                   onClick={() => setActiveFilter(null)}
                   className="p-1 text-zinc-500 hover:text-white"
                 >
@@ -1373,8 +1388,8 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
                     }}
                     className={cn(
                       "w-full text-left p-4 rounded-2xl transition-all flex items-center justify-between",
-                      (activeFilter === 'equip' ? selectedEquip : selectedMuscle) === item 
-                        ? "bg-[#CCFF00] text-black font-bold" 
+                      (activeFilter === 'equip' ? selectedEquip : selectedMuscle) === item
+                        ? "bg-[#CCFF00] text-black font-bold"
                         : "hover:bg-zinc-800 text-zinc-300"
                     )}
                   >
@@ -1384,7 +1399,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
                 ))}
               </div>
               <div className="p-6 bg-zinc-900/50">
-                <button 
+                <button
                   onClick={() => setActiveFilter(null)}
                   className="w-full bg-white text-black font-bold py-4 rounded-2xl"
                 >
@@ -1399,10 +1414,10 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
   );
 };
 
-const RoutineEditor = ({ routine, onSave, onCancel }: { 
-  routine?: Routine, 
+const RoutineEditor = ({ routine, onSave, onCancel }: {
+  routine?: Routine,
   onSave: (r: Partial<Routine>) => Promise<void>,
-  onCancel: () => void 
+  onCancel: () => void
 }) => {
   const [exercises, setExercises] = useState<WorkoutExercise[]>(routine?.exercises || []);
   const [name, setName] = useState(routine?.name || 'New Routine');
@@ -1440,7 +1455,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
       <header className="flex items-center justify-between mb-8">
         <button onClick={onCancel} className="text-zinc-500 font-bold">Cancel</button>
         <h2 className="text-lg font-bold">Edit Routine</h2>
-        <button 
+        <button
           onClick={() => onSave({ name, description, exercises })}
           className="text-[#CCFF00] font-bold"
         >
@@ -1450,16 +1465,16 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
 
       <div className="space-y-6">
         <div className="space-y-1">
-          <input 
-            type="text" 
-            value={name} 
+          <input
+            type="text"
+            value={name}
             onChange={e => setName(e.target.value)}
             className="w-full text-3xl font-bold bg-transparent border-none focus:ring-0 p-0 placeholder:text-zinc-800"
             placeholder="Routine Name"
           />
-          <input 
-            type="text" 
-            value={description} 
+          <input
+            type="text"
+            value={description}
             onChange={e => setDescription(e.target.value)}
             className="w-full text-sm text-zinc-500 bg-transparent border-none focus:ring-0 p-0 placeholder:text-zinc-800"
             placeholder="Description (Optional)"
@@ -1473,7 +1488,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                 <div className="flex items-center space-x-3">
                   <h3 className="text-lg font-bold text-[#CCFF00]">{ex.name}</h3>
                 </div>
-                <button 
+                <button
                   onClick={() => setExercises(exercises.filter((_, i) => i !== exIdx))}
                   className="text-zinc-700"
                 >
@@ -1489,21 +1504,21 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                 {ex.sets.map((set, sIdx) => (
                   <div key={sIdx} className="grid grid-cols-3 gap-4 bg-zinc-900/50 p-2 rounded-xl">
                     <div className="text-center font-mono text-xs py-2">{sIdx + 1}</div>
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       value={set.weight || ''}
                       onChange={e => updateSet(exIdx, sIdx, 'weight', parseFloat(e.target.value))}
                       className="bg-transparent border-none text-center focus:ring-0 font-bold"
                     />
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       value={set.reps || ''}
                       onChange={e => updateSet(exIdx, sIdx, 'reps', parseInt(e.target.value))}
                       className="bg-transparent border-none text-center focus:ring-0 font-bold"
                     />
                   </div>
                 ))}
-                <button 
+                <button
                   onClick={() => addSet(exIdx)}
                   className="w-full py-2 border border-dashed border-zinc-800 rounded-xl text-[10px] text-zinc-600 font-mono uppercase tracking-widest"
                 >
@@ -1513,7 +1528,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
             </div>
           ))}
 
-          <button 
+          <button
             onClick={() => setShowExerciseSelector(true)}
             className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-white font-bold"
           >
@@ -1591,7 +1606,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
     const newEx = [...exercises];
     const set = newEx[exIdx].sets[setIdx];
     const setKey = `${exIdx}-${setIdx}`;
-    
+
     if (!set.completed) {
       // Completing the set
       const startTimeRef = setStartTimes[setKey];
@@ -1609,7 +1624,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
       // For now just toggle
       set.completed = false;
     }
-    
+
     setExercises(newEx);
   };
 
@@ -1643,12 +1658,12 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
     if (exercises.length === 0 || isSaving) return;
     setIsSaving(true);
     const duration = Math.floor((Date.now() - startTime) / 1000);
-    const totalVolume = exercises.reduce((acc, ex) => 
+    const totalVolume = exercises.reduce((acc, ex) =>
       acc + ex.sets.reduce((sAcc, s) => sAcc + (s.weight * s.reps), 0), 0
     );
 
     // Calculate intensity
-    const totalActiveTime = exercises.reduce((acc, ex) => 
+    const totalActiveTime = exercises.reduce((acc, ex) =>
       acc + ex.sets.reduce((sAcc, s) => sAcc + (s.timeTaken || 0), 0), 0
     );
     // Intensity = (Volume / Duration) * (Active Ratio) * Factor
@@ -1666,14 +1681,14 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
         exercises,
         createdAt: serverTimestamp()
       };
-      
+
       const docRef = await addDoc(collection(db, 'workouts'), workoutData);
-      
+
       // Log to Google Sheets if connected
       if (sheets.accessToken && profile?.spreadsheetId) {
         await logToGoogleSheets({ ...workoutData, date: new Date().toISOString() } as any, profile.spreadsheetId, sheets.accessToken);
       }
-      
+
       setFinalVolume(totalVolume);
       setFinalIntensity(intensity);
       setIsComplete(true);
@@ -1686,7 +1701,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
   const logToGoogleSheets = async (workout: WorkoutLog, spreadsheetId: string, token: string) => {
     try {
       const date = typeof workout.date === 'string' ? workout.date : new Date().toISOString();
-      const rows = workout.exercises.flatMap(ex => 
+      const rows = workout.exercises.flatMap(ex =>
         ex.sets.map((set, i) => [
           date,
           workout.name,
@@ -1733,7 +1748,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
   if (isComplete) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0A0A0A] p-6 text-center text-white">
-        <motion.div 
+        <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className="space-y-8 max-w-sm w-full"
@@ -1790,47 +1805,47 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0A0A0A] p-6 pb-32">
-      <header className="flex items-center justify-between mb-8">
-        <div>
-          <input 
-            type="text" 
-            value={name} 
-            onChange={(e) => setName(e.target.value)}
-            className="text-2xl font-bold bg-transparent border-none focus:ring-0 p-0"
-          />
-          <div className="flex items-center space-x-2 text-[#CCFF00] font-mono text-xs mt-1">
+    <div className="flex flex-col min-h-screen bg-[#0A0A0A] pb-32">
+      <header className="sticky top-0 z-30 px-6 py-4 bg-[#0A0A0A]/95 backdrop-blur-sm border-b border-zinc-800/50">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="text-lg font-bold bg-transparent border-none focus:ring-0 p-0 w-full break-words"
+        />
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex items-center space-x-2 text-[#CCFF00] font-mono text-xs">
             <Timer className="w-3 h-3" />
             <span>{formatTime(elapsed)}</span>
           </div>
-        </div>
-        <div className="flex space-x-2">
-          <button onClick={onCancel} disabled={isSaving} className="text-zinc-600 font-bold px-4">Discard</button>
-          <button 
-            onClick={saveWorkout}
-            disabled={isSaving}
-            className="bg-[#CCFF00] text-black font-bold px-6 py-2 rounded-full text-sm shadow-lg shadow-[#CCFF00]/10 disabled:opacity-50"
-          >
-            {isSaving ? 'Saving...' : 'Finish'}
-          </button>
+          <div className="flex space-x-2 shrink-0">
+            <button onClick={onCancel} disabled={isSaving} className="text-zinc-600 font-bold px-4">Discard</button>
+            <button
+              onClick={saveWorkout}
+              disabled={isSaving}
+              className="bg-[#CCFF00] text-black font-bold px-6 py-2 rounded-full text-sm shadow-lg shadow-[#CCFF00]/10 disabled:opacity-50"
+            >
+              {isSaving ? 'Saving...' : 'Finish'}
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="flex-1 space-y-8">
+      <div className="flex-1 space-y-8 px-6 pt-6">
         {exercises.map((ex, exIdx) => (
           <div key={exIdx} className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <h3 className="text-xl font-bold text-[#CCFF00]">{ex.name}</h3>
               </div>
-              <button 
-                 onClick={() => setExercises(exercises.filter((_, i) => i !== exIdx))}
-                 className="text-zinc-600 hover:text-red-500 transition-colors"
+              <button
+                onClick={() => setExercises(exercises.filter((_, i) => i !== exIdx))}
+                className="text-zinc-600 hover:text-red-500 transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
-            
+
             <div className="space-y-2">
               <div className="grid grid-cols-6 gap-2 px-2 text-[8px] font-mono text-zinc-600 uppercase tracking-widest">
                 <div className="text-center">Set</div>
@@ -1840,16 +1855,16 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
                 <div className="text-center">Sec</div>
                 <div className="text-right pr-2">Done</div>
               </div>
-              
+
               {ex.sets.map((set, sIdx) => {
                 const setKey = `${exIdx}-${sIdx}`;
                 const isTimerRunning = !!setStartTimes[setKey];
 
                 return (
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
-                    key={sIdx} 
+                    key={sIdx}
                     className={cn(
                       "grid grid-cols-6 gap-2 items-center p-2 rounded-xl transition-all duration-300",
                       set.completed ? "bg-[#CCFF00]/10 border border-[#CCFF00]/30 shadow-inner" : "bg-zinc-900 border border-transparent"
@@ -1857,24 +1872,24 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
                   >
                     <div className="font-mono text-sm text-center bg-zinc-800 py-1 rounded-md">{sIdx + 1}</div>
                     <div className="text-center text-[9px] text-zinc-500 font-mono font-bold">{getPrevPerformance(ex.name, sIdx)}</div>
-                    <input 
-                      type="number" 
-                      value={set.weight || ''} 
+                    <input
+                      type="number"
+                      value={set.weight || ''}
                       placeholder="0"
                       onChange={(e) => updateSet(exIdx, sIdx, 'weight', parseFloat(e.target.value))}
                       className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
                     />
-                    <input 
-                      type="number" 
-                      value={set.reps || ''} 
+                    <input
+                      type="number"
+                      value={set.reps || ''}
                       placeholder="0"
                       onChange={(e) => updateSet(exIdx, sIdx, 'reps', parseInt(e.target.value))}
                       className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
                     />
                     <div className="relative group">
-                      <input 
-                        type="text" 
-                        value={formatTimeTaken(set.timeTaken)} 
+                      <input
+                        type="text"
+                        value={formatTimeTaken(set.timeTaken)}
                         placeholder="0:00"
                         onChange={(e) => updateSet(exIdx, sIdx, 'timeTaken', parseTimeTaken(e.target.value))}
                         className={cn(
@@ -1883,7 +1898,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
                         )}
                       />
                       {!set.completed && !isTimerRunning && (
-                        <button 
+                        <button
                           onClick={() => startSetTimer(exIdx, sIdx)}
                           className="absolute inset-0 bg-zinc-800/80 rounded opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
                         >
@@ -1892,7 +1907,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
                       )}
                     </div>
                     <div className="flex justify-end pr-2">
-                      <button 
+                      <button
                         onClick={() => toggleSetComplete(exIdx, sIdx)}
                         className={cn(
                           "flex items-center justify-center p-1 rounded-lg transition-transform active:scale-90",
@@ -1909,8 +1924,8 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
                   </motion.div>
                 );
               })}
-              
-              <button 
+
+              <button
                 onClick={() => addSet(exIdx)}
                 className="w-full py-2 rounded-xl border border-zinc-800 text-zinc-500 font-mono text-xs uppercase tracking-widest hover:bg-zinc-900 transition-colors"
               >
@@ -1920,7 +1935,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
           </div>
         ))}
 
-        <button 
+        <button
           onClick={() => setShowExerciseSelector(true)}
           className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-[#CCFF00] font-bold hover:bg-zinc-800 transition-colors"
         >
@@ -1932,16 +1947,16 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
   );
 };
 
-const AIAssistant = ({ 
-  workouts, 
-  profile, 
+const AIAssistant = ({
+  workouts,
+  profile,
   routines,
   onCreateRoutine,
   onUpdateRoutine,
   onDeleteRoutine,
   onUpdateProfile
-}: { 
-  workouts: WorkoutLog[], 
+}: {
+  workouts: WorkoutLog[],
   profile: UserProfile | null,
   routines: Routine[],
   onCreateRoutine: (data: any) => Promise<any>,
@@ -2060,7 +2075,7 @@ const AIAssistant = ({
     if (!user) return null;
     const convData = {
       userId: user.uid,
-      title: firstMessage.slice(0, 30) + (firstMessage.length > 30 ? '...' : ''),
+                      title: firstMessage.slice(0, 30) + (firstMessage.length > 30 ? '...' : ''),
       lastMessage: firstMessage,
       updatedAt: serverTimestamp()
     };
@@ -2071,28 +2086,37 @@ const AIAssistant = ({
   const summarizeConversation = async (msgs: ChatMessage[]) => {
     if (!user) return;
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const model = new ChatOpenAI({
+        modelName: "gpt-5.4-mini",
+        openAIApiKey: process.env.OPENAI_API_KEY,
+        configuration: { dangerouslyAllowBrowser: true }
+      });
+
       const promptText = `Analyze the following chat history and update the "Neural Memory".
       
 Existing Memory (Chat History Summary):
 ${summary}
 
-Recent Interaction:
+New Messages:
 ${msgs.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n')}
 
-Task:
-1. Update the summary of the user's progress and fitness goals.
-2. CRITICAL: Extract and persist "Key Neural Facts" such as the user's Name (if mentioned), Injuries, Equipment access, or specific likes/dislikes.
-3. Keep it concise but ensure no personal detail (like a name) is lost between sessions.
+Rules:
+- Synthesize key information (new goals, preferences, physical issues)
+- Keep it under 200 words
+- Maintain a structured, informative tone
 
 New Neural Memory:`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-lite-preview",
-        contents: promptText
+      const response = await model.invoke(promptText, {
+        callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" ? [
+          new LangChainTracer({
+            projectName: process.env.LANGCHAIN_PROJECT,
+            apiKey: process.env.LANGCHAIN_API_KEY,
+          })
+        ] : []
       });
-
-      const newSummary = (response.text || summary).trim();
+      const newSummary = (response.content.toString() || summary).trim();
+      
       setSummary(newSummary);
       await setDoc(doc(db, 'users', user.uid, 'chat_summary', 'main'), {
         userId: user.uid,
@@ -2143,7 +2167,7 @@ New Neural Memory:`;
     if (!convId) return;
 
     const newMsg: ChatMessage = { role: 'user', text: userMsg, timestamp: new Date() };
-    
+
     setMessages(prev => [...prev, newMsg]);
     setPrompt('');
     setIsTyping(true);
@@ -2162,7 +2186,7 @@ User Profile:
     const workoutContext = workouts.map(w => {
       const date = format(new Date(w.date.seconds * 1000), 'MMM d');
       const exercises = w.exercises.map(e => {
-        const sets = e.sets.map((s, i) => `Set ${i+1}: ${s.weight}kg x ${s.reps}`).join(', ');
+        const sets = e.sets.map((s, i) => `Set ${i + 1}: ${s.weight}kg x ${s.reps}`).join(', ');
         return `${e.name}: [${sets}]`;
       }).join('\n      ');
       return `[${date}] ${w.name}:\n      ${exercises}\n      (Total Volume: ${w.totalVolume}kg, Duration: ${Math.floor(w.duration / 60)}m)`;
@@ -2200,190 +2224,167 @@ ${workoutContext || "No history yet."}
 ---`;
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      // Model Routing
-      // If prompt asks for a "plan", "routine", "analysis", or refers to multiple workouts, use FLASH.
-      // Otherwise use LITE.
-      const routerPrompt = `Task Routing. Categorize this request as 'SIMPLE' or 'COMPLEX'.
-      COMPLEX examples: Detailed routine planning, deep workout analysis over time, nutritional strategy, medical/physio questions.
-      SIMPLE examples: Greetings (hi, hello, yo), brief feedback (thanks, okay), motivational bursts, single exercise info.
-      
-      Request: "${userMsg}"
-      Category:`;
-
-      const routeRes = await ai.models.generateContent({
-        model: "gemini-3.1-flash-lite-preview",
-        contents: routerPrompt
-      });
-      
-      const isComplex = routeRes.text?.toUpperCase().includes('COMPLEX');
-      const selectedModel = isComplex ? "gemini-3-flash-preview" : "gemini-3.1-flash-lite-preview";
-
-      const tools = [{
-        functionDeclarations: [
-          {
-            name: "create_routine",
-            description: "Create a new workout routine for the user",
-            parameters: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING, description: "Name of the routine (e.g. 'Push Day')" },
-                exercises: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING },
-                      sets: {
-                        type: Type.ARRAY,
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            weight: { type: Type.NUMBER },
-                            reps: { type: Type.NUMBER }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              required: ["name", "exercises"]
-            }
-          },
-          {
-            name: "update_routine",
-            description: "Update an existing workout routine",
-            parameters: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING, description: "The ID of the routine to update" },
-                name: { type: Type.STRING },
-                exercises: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      name: { type: Type.STRING },
-                      sets: {
-                        type: Type.ARRAY,
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            weight: { type: Type.NUMBER },
-                            reps: { type: Type.NUMBER }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              required: ["id"]
-            }
-          },
-          {
-            name: "delete_routine",
-            description: "Delete an existing workout routine",
-            parameters: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING, description: "The ID of the routine to delete" }
-              },
-              required: ["id"]
-            }
-          },
-          {
-            name: "update_profile",
-            description: "Updates user's fitness profile information (name, goal, weight, age, sex, aim etc.)",
-            parameters: {
-              type: Type.OBJECT,
-              properties: {
-                displayName: { type: Type.STRING, description: "User's preferred name" },
-                goal: { type: Type.STRING, description: "Short primary goal" },
-                aim: { type: Type.STRING, description: "Detailed vision/aim" },
-                weight: { type: Type.NUMBER },
-                age: { type: Type.NUMBER },
-                sex: { type: Type.STRING, enum: ["male", "female", "other"] },
-                level: { type: Type.STRING, enum: ["beginner", "intermediate", "advanced"] },
-                equipment: { type: Type.ARRAY, items: { type: Type.STRING } }
-              }
-            }
-          }
-        ]
-      }];
-
-      const chatHistory = messages.slice(-10).map(m => ({
-        role: m.role === 'bot' ? 'model' : m.role,
-        parts: [{ text: m.text }]
-      }));
-
-      const response = await ai.models.generateContent({
-        model: selectedModel,
-        contents: [
-          ...chatHistory,
-          { role: 'user', parts: [{ text: userMsg }] }
-        ],
-        config: {
-          systemInstruction,
-          tools
+      // 1. Initialize LangChain ChatOpenAI with LangSmith support
+      const model = new ChatOpenAI({
+        modelName: "gpt-5.4-mini",
+        openAIApiKey: process.env.OPENAI_API_KEY,
+        configuration: {
+          dangerouslyAllowBrowser: true,
         }
       });
 
-      const functionCalls = response.functionCalls;
-      let botText = response.text || "";
+      // 2. Define Tools using LangChain 'tool' helper
+      const createRoutineTool = tool(async (args) => {
+        await onCreateRoutine(args);
+        return "Routine created successfully.";
+      }, {
+        name: "create_routine",
+        description: "Create a new workout routine for the user",
+        schema: z.object({
+          name: z.string().describe("Name of the routine (e.g. 'Push Day')"),
+          exercises: z.array(z.object({
+            name: z.string(),
+            sets: z.array(z.object({
+              weight: z.number(),
+              reps: z.number()
+            }))
+          }))
+        })
+      });
 
-      if (functionCalls) {
-        let toolResults = [];
-        for (const call of functionCalls) {
-          if (call.name === 'create_routine') {
-            await onCreateRoutine(call.args);
-            toolResults.push("Routine created successfully.");
-          } else if (call.name === 'update_routine') {
-            // @ts-ignore
-            await onUpdateRoutine(call.args.id, call.args);
-            toolResults.push("Routine updated successfully.");
-          } else if (call.name === 'delete_routine') {
-            // @ts-ignore
-            await onDeleteRoutine(call.args.id);
-            toolResults.push("Routine deleted successfully.");
-          } else if (call.name === 'update_profile') {
-            await onUpdateProfile(call.args);
-            toolResults.push("Profile updated successfully.");
-          }
-        }
+      const updateRoutineTool = tool(async (args) => {
+        // @ts-ignore
+        await onUpdateRoutine(args.id, args);
+        return "Routine updated successfully.";
+      }, {
+        name: "update_routine",
+        description: "Update an existing workout routine",
+        schema: z.object({
+          id: z.string().describe("The ID of the routine to update"),
+          name: z.string().optional(),
+          exercises: z.array(z.object({
+            name: z.string(),
+            sets: z.array(z.object({
+              weight: z.number(),
+              reps: z.number()
+            }))
+          })).optional()
+        })
+      });
+
+      const deleteRoutineTool = tool(async (args) => {
+        // @ts-ignore
+        await onDeleteRoutine(args.id);
+        return "Routine deleted successfully.";
+      }, {
+        name: "delete_routine",
+        description: "Delete an existing workout routine",
+        schema: z.object({
+          id: z.string().describe("The ID of the routine to delete")
+        })
+      });
+
+      const updateProfileTool = tool(async (args) => {
+        await onUpdateProfile(args);
+        return "Profile updated successfully.";
+      }, {
+        name: "update_profile",
+        description: "Updates user's fitness profile information (name, goal, weight, age, sex, aim etc.)",
+        schema: z.object({
+          displayName: z.string().optional(),
+          goal: z.string().optional(),
+          aim: z.string().optional(),
+          weight: z.number().optional(),
+          age: z.number().optional(),
+          sex: z.enum(["male", "female", "other"]).optional(),
+          level: z.enum(["beginner", "intermediate", "advanced"]).optional(),
+          equipment: z.array(z.string()).optional()
+        })
+      });
+
+      const tools = [createRoutineTool, updateRoutineTool, deleteRoutineTool, updateProfileTool];
+      const modelWithTools = model.bindTools(tools);
+
+      // 3. Define LangGraph State and Workflow
+      const StateAnnotation = Annotation.Root({
+        messages: Annotation<any[]>({
+          reducer: (x, y) => x.concat(y),
+        }),
+      });
+
+      const callModel = async (state: typeof StateAnnotation.State) => {
+        const response = await modelWithTools.invoke(state.messages);
+        return { messages: [response] };
+      };
+
+      const toolNode = async (state: typeof StateAnnotation.State) => {
+        const lastMessage = state.messages[state.messages.length - 1];
+        const results: ToolMessage[] = [];
         
-        const followUp = await ai.models.generateContent({
-          model: selectedModel,
-          contents: [
-            ...chatHistory,
-            { role: 'user', parts: [{ text: userMsg }] },
-            { role: 'model', parts: [{ text: botText }, ...functionCalls.map(c => ({ functionCall: c }))] },
-            { role: 'user', parts: toolResults.map(tr => ({ text: tr })) }
-          ],
-          config: {
-            systemInstruction,
-            tools
+        if (lastMessage.tool_calls?.length) {
+          for (const call of lastMessage.tool_calls) {
+            const toolToCall = tools.find(t => t.name === call.name);
+            if (toolToCall) {
+              const output = await toolToCall.invoke(call);
+              results.push(output);
+            }
           }
-        });
-        botText = followUp.text || "Action complete.";
-      }
+        }
+        return { messages: results };
+      };
 
-      if (!botText) botText = "My sensors are fuzzy. Try again.";
+      const workflow = new StateGraph(StateAnnotation)
+        .addNode("agent", callModel)
+        .addNode("tools", toolNode)
+        .addEdge("__start__", "agent")
+        .addConditionalEdges("agent", (state) => {
+          const lastMessage = state.messages[state.messages.length - 1];
+          if (lastMessage.tool_calls?.length) return "tools";
+          return "__end__";
+        })
+        .addEdge("tools", "agent");
+
+      const app = workflow.compile();
+
+      // 4. Prepare Conversation for LangGraph
+      const langChainHistory = [
+        new SystemMessage(systemInstruction),
+        ...messages.slice(-10).map(m => 
+          m.role === 'bot' ? new AIMessage(m.text) : new HumanMessage(m.text)
+        ),
+        new HumanMessage(userMsg)
+      ];
+
+      // 5. Execute Graph with Invoke
+      const result = await app.invoke(
+        { messages: langChainHistory },
+        { 
+          callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" ? [
+            new LangChainTracer({
+              projectName: process.env.LANGCHAIN_PROJECT,
+              apiKey: process.env.LANGCHAIN_API_KEY,
+            })
+          ] : []
+        }
+      );
+
+      const finalMessage = result.messages[result.messages.length - 1];
+      const botText = finalMessage.content?.toString() || "Action complete.";
       
-      const botMsg: ChatMessage = { role: 'bot', text: botText, timestamp: new Date() };
-      setMessages(prev => [...prev, botMsg]);
+      setMessages(prev => [...prev, { role: 'bot', text: botText, timestamp: new Date() }]);
+
       if (convId) await saveMessage('bot', botText, convId);
 
       // Trigger summarization check
+      const botMsg: ChatMessage = { role: 'bot', text: botText, timestamp: new Date() };
       if (messages.length + 2 > MESSAGE_LIMIT) {
         summarizeConversation([...messages, newMsg, botMsg]);
       }
 
-    } catch (e) {
-      console.error(e);
-      setMessages(prev => [...prev, { role: 'bot', text: "Connection cut. I'm offline.", timestamp: new Date() }]);
+    } catch (e: any) {
+      console.error("FitAI Coach Error:", e);
+      const errMsg = e.message || "Unknown connectivity issue";
+      setMessages(prev => [...prev, { role: 'bot', text: `Coach Connection Error: ${errMsg}`, timestamp: new Date() }]);
     } finally {
       setIsTyping(false);
     }
@@ -2391,30 +2392,30 @@ ${workoutContext || "No history yet."}
 
   return (
     <div className={cn(
-      "flex flex-col h-full space-y-4 relative overflow-hidden transition-colors duration-300",
+      "flex flex-col h-full relative transition-colors duration-300",
       chatTheme === 'light' ? "bg-white text-zinc-900" : "bg-black text-white"
     )}>
       <header className={cn(
-        "flex items-center justify-between p-4 rounded-3xl border transition-colors mx-4 mt-4",
+        "flex items-center justify-between p-4 rounded-3xl border transition-colors mx-4 mt-4 mb-2",
         chatTheme === 'light' ? "bg-zinc-50 border-zinc-200" : "bg-zinc-900/50 border-zinc-800"
       )}>
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-[#CCFF00] rounded-full flex items-center justify-center">
-            <Brain className="w-6 h-6 text-black" />
+          <div className={cn(
+            "p-2 rounded-2xl",
+            chatTheme === 'light' ? "bg-zinc-200" : "bg-zinc-800"
+          )}>
+            <Brain className="w-5 h-5 text-lime-400" />
           </div>
           <div>
-            <h2 className="text-xl font-bold">Coach FitAI</h2>
+            <h2 className="font-bold text-sm tracking-tight">Coach FitAI</h2>
             <div className="flex items-center space-x-1">
-              <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-              <span className={cn(
-                "text-[10px] uppercase tracking-widest font-mono",
-                chatTheme === 'light' ? "text-zinc-500" : "text-zinc-400"
-              )}>Neural Engine Active</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-lime-500 animate-pulse" />
+              <span className="text-[10px] uppercase tracking-widest opacity-50 font-medium">Neural Engine Active (v1.1)</span>
             </div>
           </div>
         </div>
         <div className="flex items-center space-x-2">
-          <button 
+          <button
             onClick={() => setChatTheme(prev => prev === 'dark' ? 'light' : 'dark')}
             className={cn(
               "p-2 rounded-full transition-colors",
@@ -2424,7 +2425,7 @@ ${workoutContext || "No history yet."}
           >
             {chatTheme === 'light' ? <Moon className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
           </button>
-          <button 
+          <button
             onClick={() => setShowHistory(!showHistory)}
             className={cn(
               "p-2 rounded-full transition-colors",
@@ -2434,7 +2435,7 @@ ${workoutContext || "No history yet."}
           >
             <History className="w-5 h-5" />
           </button>
-          <button 
+          <button
             onClick={startNewChat}
             className={cn(
               "p-2 rounded-full transition-colors",
@@ -2449,7 +2450,7 @@ ${workoutContext || "No history yet."}
 
       <AnimatePresence>
         {showHistory && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: 50 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 50 }}
@@ -2462,7 +2463,7 @@ ${workoutContext || "No history yet."}
               </button>
             </div>
             <div className="space-y-3 overflow-y-auto max-h-[70%] no-scrollbar px-1">
-              <button 
+              <button
                 onClick={startNewChat}
                 className="w-full flex items-center space-x-3 p-4 rounded-2xl bg-[#CCFF00]/10 border border-[#CCFF00]/20 text-[#CCFF00] font-bold text-sm"
               >
@@ -2484,8 +2485,8 @@ ${workoutContext || "No history yet."}
                     }}
                     className={cn(
                       "w-full text-left p-4 rounded-2xl border transition-all",
-                      currentConversationId === conv.id 
-                        ? "bg-[#CCFF00] border-[#CCFF00] text-black" 
+                      currentConversationId === conv.id
+                        ? "bg-[#CCFF00] border-[#CCFF00] text-black"
                         : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
                     )}
                   >
@@ -2509,7 +2510,7 @@ ${workoutContext || "No history yet."}
         )}
       </AnimatePresence>
 
-      <div className="flex-1 overflow-y-auto space-y-6 scroll-smooth px-4 pt-2 pb-32 no-scrollbar">
+      <div className="flex-1 overflow-y-auto space-y-6 scroll-smooth px-4 pt-2 pb-40 no-scrollbar">
         {isLoadingHistory && (
           <div className="text-center p-8">
             <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: "linear" }}>
@@ -2521,20 +2522,20 @@ ${workoutContext || "No history yet."}
 
         <AnimatePresence mode="popLayout" initial={false}>
           {messages.map((m, i) => (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              key={i} 
+              key={i}
               className={cn(
                 "p-4 rounded-3xl text-sm max-w-[85%] shadow-md",
-                m.role === 'user' 
-                  ? (chatTheme === 'light' ? "bg-[#CCFF00] text-black ml-auto rounded-tr-none border border-[#CCFF00]/20" : "bg-zinc-100 text-black ml-auto rounded-tr-none shadow-white/5") 
+                m.role === 'user'
+                  ? (chatTheme === 'light' ? "bg-[#CCFF00] text-black ml-auto rounded-tr-none border border-[#CCFF00]/20" : "bg-zinc-800 text-white ml-auto rounded-tr-none border border-zinc-700 shadow-white/5")
                   : (chatTheme === 'light' ? "bg-zinc-900 text-white rounded-tl-none border border-zinc-800" : "bg-[#1A1A1A] text-white rounded-tl-none border border-zinc-800 shadow-lg shadow-black/20")
               )}
             >
               <div className={cn(
                 "prose prose-sm max-w-none prose-headings:font-bold prose-p:leading-relaxed",
-                m.role === 'bot' ? "prose-invert" : "text-black prose-p:text-black prose-headings:text-black prose-strong:text-black prose-code:text-black"
+                m.role === 'bot' ? "prose-invert" : (chatTheme === 'light' ? "text-black prose-p:text-black prose-headings:text-black prose-strong:text-black prose-code:text-black" : "text-white prose-invert")
               )}>
                 <ReactMarkdown>{m.text}</ReactMarkdown>
               </div>
@@ -2569,15 +2570,15 @@ ${workoutContext || "No history yet."}
         )}
       </div>
 
-      <div className="absolute bottom-6 left-0 right-0 px-4">
+      <div className="fixed bottom-20 left-0 right-0 px-4 pb-2 z-50" style={{ background: chatTheme === 'light' ? 'white' : 'black' }}>
         <div className="relative flex items-center max-w-2xl mx-auto shadow-2xl">
-          <input 
-            type="text" 
+          <input
+            type="text"
             placeholder="Plan a leg day split..."
             className={cn(
               "w-full rounded-2xl py-4 pl-4 pr-28 focus:outline-none transition-all border",
-              chatTheme === 'light' 
-                ? "bg-white border-zinc-200 text-black focus:border-[#CCFF00]" 
+              chatTheme === 'light'
+                ? "bg-white border-zinc-200 text-black focus:border-[#CCFF00]"
                 : "bg-[#1A1A1A] border-zinc-800 text-white focus:border-[#CCFF00]"
             )}
             value={prompt}
@@ -2585,7 +2586,7 @@ ${workoutContext || "No history yet."}
             onKeyDown={(e) => e.key === 'Enter' && askAI()}
           />
           <div className="absolute right-3 flex items-center space-x-1">
-            <button 
+            <button
               onClick={startListening}
               className={cn(
                 "p-2 rounded-lg transition-colors",
@@ -2594,7 +2595,7 @@ ${workoutContext || "No history yet."}
             >
               <Mic className="w-5 h-5" />
             </button>
-            <button 
+            <button
               onClick={askAI}
               disabled={!prompt.trim() || isTyping}
               className="p-2 bg-[#CCFF00] text-black rounded-xl disabled:opacity-50 shadow-lg shadow-[#CCFF00]/10 hover:scale-105 active:scale-95 transition-all"
@@ -2669,7 +2670,7 @@ export default function App() {
 
   const fetchWorkouts = async (uid: string) => {
     const q = query(
-      collection(db, 'workouts'), 
+      collection(db, 'workouts'),
       where('userId', '==', uid),
       orderBy('date', 'desc'),
       limit(10)
@@ -2800,9 +2801,9 @@ export default function App() {
         });
 
         if (!headerResponse.ok) {
-           console.warn('Failed to set headers, but sheet was created:', await headerResponse.text());
+          console.warn('Failed to set headers, but sheet was created:', await headerResponse.text());
         }
-        
+
         await updateProfile({ spreadsheetId: data.spreadsheetId });
         alert('FitAI Workout Log sheet created successfully in your Google Drive!');
         return data.spreadsheetId;
@@ -2893,12 +2894,12 @@ export default function App() {
     accessToken: googleAccessToken
   };
 
-  const contextValue = { 
-    user, 
-    profile, 
-    loading, 
-    signIn, 
-    signOutUser, 
+  const contextValue = {
+    user,
+    profile,
+    loading,
+    signIn,
+    signOutUser,
     sheets: sheetsContextValue,
     updateProfile
   };
@@ -2912,7 +2913,7 @@ export default function App() {
   const renderContent = () => {
     if (editingRoutine) {
       return (
-        <RoutineEditor 
+        <RoutineEditor
           routine={editingRoutine === 'new' ? undefined : editingRoutine}
           onSave={saveRoutine}
           onCancel={() => setEditingRoutine(null)}
@@ -2922,14 +2923,14 @@ export default function App() {
 
     if (isLogging) {
       return (
-        <WorkoutLogger 
+        <WorkoutLogger
           routine={activeRoutine || undefined}
           workouts={workouts}
-          onComplete={() => { 
-            setIsLogging(false); 
+          onComplete={() => {
+            setIsLogging(false);
             setActiveRoutine(null);
-            fetchWorkouts(user.uid); 
-          }} 
+            fetchWorkouts(user.uid);
+          }}
           onCancel={() => {
             setIsLogging(false);
             setActiveRoutine(null);
@@ -2940,7 +2941,7 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-[#0A0A0A] text-white">
-        <main className="p-6">
+        <main className="h-[calc(100vh-5rem)] overflow-hidden">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -2948,12 +2949,13 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -10 }}
               transition={{ duration: 0.2 }}
+              className={activeTab === 'ai' ? 'h-full' : 'p-6'}
             >
               {activeTab === 'dash' && <Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} />}
               {activeTab === 'ai' && (
-                <AIAssistant 
-                  workouts={workouts} 
-                  profile={profile} 
+                <AIAssistant
+                  workouts={workouts}
+                  profile={profile}
                   routines={routines}
                   onCreateRoutine={aiCreateRoutine}
                   onUpdateRoutine={aiUpdateRoutine}
@@ -2962,7 +2964,7 @@ export default function App() {
                 />
               )}
               {activeTab === 'routines' && (
-                <RoutinesManager 
+                <RoutinesManager
                   routines={routines}
                   onStart={(r) => { setActiveRoutine(r); setIsLogging(true); }}
                   onEdit={(r) => setEditingRoutine(r)}
@@ -2971,10 +2973,10 @@ export default function App() {
                 />
               )}
               {activeTab === 'profile' && (
-                <ProfileSection 
-                  profile={profile} 
-                  workouts={workouts} 
-                  onUpdate={updateProfile} 
+                <ProfileSection
+                  profile={profile}
+                  workouts={workouts}
+                  onUpdate={updateProfile}
                   onSignOut={signOutUser}
                 />
               )}
