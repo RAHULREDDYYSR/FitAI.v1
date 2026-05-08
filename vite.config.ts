@@ -14,6 +14,7 @@ export default defineConfig(({mode}) => {
       'process.env.LANGCHAIN_TRACING_V2': JSON.stringify(env.LANGSMITH_TRACING),
       'process.env.LANGCHAIN_PROJECT': JSON.stringify(env.LANGCHAIN_PROJECT),
       'process.env.LANGCHAIN_ENDPOINT': JSON.stringify("https://api.smith.langchain.com"),
+      'process.env.TAVILY_API_KEY': JSON.stringify(env.TAVILY_API_KEY),
     },
     resolve: {
       alias: {
