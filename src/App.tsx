@@ -26,7 +26,7 @@ import {
   Info,
   Loader2
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import {
   format,
   subMonths,
@@ -1516,13 +1516,14 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                 </button>
               </div>
               <div className="space-y-2">
-                <div className="grid grid-cols-3 gap-4 px-2 text-[10px] font-mono text-zinc-600 uppercase tracking-widest text-center">
+                <div className="grid grid-cols-4 gap-4 px-2 text-[10px] font-mono text-zinc-600 uppercase tracking-widest text-center">
                   <div>Set</div>
                   <div>kg</div>
                   <div>Reps</div>
+                  <div></div>
                 </div>
                 {ex.sets.map((set, sIdx) => (
-                  <div key={sIdx} className="grid grid-cols-3 gap-4 bg-zinc-900/50 p-2 rounded-xl">
+                  <div key={sIdx} className="grid grid-cols-4 gap-4 bg-zinc-900/50 p-2 rounded-xl items-center">
                     <div className="text-center font-mono text-xs py-2">{sIdx + 1}</div>
                     <input
                       type="number"
@@ -1536,6 +1537,16 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                       onChange={e => updateSet(exIdx, sIdx, 'reps', parseInt(e.target.value))}
                       className="bg-transparent border-none text-center focus:ring-0 font-bold"
                     />
+                    <button
+                      onClick={() => {
+                        const newEx = [...exercises];
+                        newEx[exIdx].sets = newEx[exIdx].sets.filter((_, i) => i !== sIdx);
+                        setExercises(newEx);
+                      }}
+                      className="flex justify-center text-zinc-700 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 ))}
                 <button
@@ -1561,10 +1572,157 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   );
 };
 
+const ExerciseItem = ({ 
+  ex, 
+  exIdx, 
+  exercises, 
+  setExercises, 
+  getPrevPerformance, 
+  updateSet, 
+  toggleSetComplete, 
+  startSetTimer, 
+  formatTimeTaken, 
+  parseTimeTaken, 
+  setStartTimes, 
+  addSet 
+}: any) => {
+  const dragControls = useDragControls();
+
+  return (
+    <Reorder.Item 
+      key={ex.sessionKey} 
+      value={ex} 
+      dragListener={false}
+      dragControls={dragControls}
+      className="space-y-4 bg-[#0A0A0A] select-none"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <div 
+            onPointerDown={(e) => dragControls.start(e)}
+            className="cursor-grab active:cursor-grabbing p-2 opacity-50 hover:opacity-100 touch-none"
+          >
+            <div className="flex space-x-1">
+              <div className="w-1 h-4 bg-zinc-700 rounded-full" />
+              <div className="w-1 h-4 bg-zinc-700 rounded-full" />
+              <div className="w-1 h-4 bg-zinc-700 rounded-full" />
+            </div>
+          </div>
+          <h3 className="text-xl font-bold text-[#CCFF00]">{ex.name}</h3>
+        </div>
+        <button
+          onClick={() => setExercises(exercises.filter((_: any, i: number) => i !== exIdx))}
+          className="text-zinc-600 hover:text-red-500 transition-colors p-2"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        <div className="grid grid-cols-6 gap-2 px-2 text-[8px] font-mono text-zinc-600 uppercase tracking-widest">
+          <div className="text-center">Set</div>
+          <div className="text-center">Prev</div>
+          <div className="text-center">kg</div>
+          <div className="text-center">Reps</div>
+          <div className="text-center">Sec</div>
+          <div className="text-right pr-2">Done</div>
+        </div>
+
+        {ex.sets.map((set: any, sIdx: number) => {
+          const setKey = `${exIdx}-${sIdx}`;
+          const isTimerRunning = !!setStartTimes[setKey];
+
+          return (
+            <motion.div
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              key={sIdx}
+              className={cn(
+                "grid grid-cols-6 gap-2 items-center p-2 rounded-xl transition-all duration-300",
+                set.completed ? "bg-[#CCFF00]/10 border border-[#CCFF00]/30 shadow-inner" : "bg-zinc-900 border border-transparent"
+              )}
+            >
+              <div className="font-mono text-sm text-center bg-zinc-800 py-1 rounded-md">{sIdx + 1}</div>
+              <div className="text-center text-[9px] text-zinc-500 font-mono font-bold">{getPrevPerformance(ex.name, sIdx)}</div>
+              <input
+                type="number"
+                value={set.weight || ''}
+                placeholder="0"
+                onChange={(e) => updateSet(exIdx, sIdx, 'weight', parseFloat(e.target.value))}
+                className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
+              />
+              <input
+                type="number"
+                value={set.reps || ''}
+                placeholder="0"
+                onChange={(e) => updateSet(exIdx, sIdx, 'reps', parseInt(e.target.value))}
+                className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
+              />
+              <div className="relative group">
+                <input
+                  type="text"
+                  value={formatTimeTaken(set.timeTaken)}
+                  placeholder="0:00"
+                  onChange={(e) => updateSet(exIdx, sIdx, 'timeTaken', parseTimeTaken(e.target.value))}
+                  className={cn(
+                    "bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-mono w-full",
+                    isTimerRunning ? "text-[#CCFF00] animate-pulse" : ""
+                  )}
+                />
+                {!set.completed && !isTimerRunning && (
+                  <button
+                    onClick={() => startSetTimer(exIdx, sIdx)}
+                    className="absolute inset-0 bg-zinc-800/80 rounded opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                  >
+                    <Play className="w-3 h-3 text-[#CCFF00]" />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center justify-end space-x-2 pr-1">
+                <button
+                  onClick={() => toggleSetComplete(exIdx, sIdx)}
+                  className={cn(
+                    "flex items-center justify-center p-1 rounded-lg transition-transform active:scale-90",
+                    set.completed ? "text-[#CCFF00]" : "text-zinc-700"
+                  )}
+                >
+                  {set.completed ? (
+                    <CheckCircle2 className="w-6 h-6 fill-current bg-black rounded-full" />
+                  ) : (
+                    <div className="w-6 h-6 rounded-md border-2 border-zinc-700" />
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    const newEx = [...exercises];
+                    newEx[exIdx].sets = newEx[exIdx].sets.filter((_: any, i: number) => i !== sIdx);
+                    setExercises(newEx);
+                  }}
+                  className="text-zinc-700 hover:text-red-500 transition-colors p-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </motion.div>
+          );
+        })}
+
+        <button
+          onClick={() => addSet(exIdx)}
+          className="w-full py-2 rounded-xl border border-zinc-800 text-zinc-500 font-mono text-xs uppercase tracking-widest hover:bg-zinc-900 transition-colors"
+        >
+          Add Set
+        </button>
+      </div>
+    </Reorder.Item>
+  );
+};
+
 const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: Routine, workouts: WorkoutLog[], onComplete: () => void, onCancel: () => void }) => {
   const { profile, sheets } = useAuth();
   const [exercises, setExercises] = useState<WorkoutExercise[]>(routine?.exercises.map(e => ({
     ...e,
+    sessionKey: Math.random().toString(36).substr(2, 9),
     sets: e.sets.map(s => ({ ...s, completed: false }))
   })) || []);
   const [name, setName] = useState(routine?.name || 'Morning Session');
@@ -1603,6 +1761,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
 
   const addExercise = (exercise: typeof EXERCISES[0]) => {
     setExercises([...exercises, {
+      sessionKey: Math.random().toString(36).substr(2, 9),
       exerciseId: exercise.id,
       name: exercise.name,
       sets: [{ reps: 0, weight: 0, completed: false }]
@@ -1851,108 +2010,23 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
         </div>
       </header>
 
-      <div className="flex-1 space-y-8 px-6 pt-6">
+      <Reorder.Group axis="y" values={exercises} onReorder={setExercises} className="flex-1 space-y-8 px-6 pt-6">
         {exercises.map((ex, exIdx) => (
-          <div key={exIdx} className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <h3 className="text-xl font-bold text-[#CCFF00]">{ex.name}</h3>
-              </div>
-              <button
-                onClick={() => setExercises(exercises.filter((_, i) => i !== exIdx))}
-                className="text-zinc-600 hover:text-red-500 transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <div className="grid grid-cols-6 gap-2 px-2 text-[8px] font-mono text-zinc-600 uppercase tracking-widest">
-                <div className="text-center">Set</div>
-                <div className="text-center">Prev</div>
-                <div className="text-center">kg</div>
-                <div className="text-center">Reps</div>
-                <div className="text-center">Sec</div>
-                <div className="text-right pr-2">Done</div>
-              </div>
-
-              {ex.sets.map((set, sIdx) => {
-                const setKey = `${exIdx}-${sIdx}`;
-                const isTimerRunning = !!setStartTimes[setKey];
-
-                return (
-                  <motion.div
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    key={sIdx}
-                    className={cn(
-                      "grid grid-cols-6 gap-2 items-center p-2 rounded-xl transition-all duration-300",
-                      set.completed ? "bg-[#CCFF00]/10 border border-[#CCFF00]/30 shadow-inner" : "bg-zinc-900 border border-transparent"
-                    )}
-                  >
-                    <div className="font-mono text-sm text-center bg-zinc-800 py-1 rounded-md">{sIdx + 1}</div>
-                    <div className="text-center text-[9px] text-zinc-500 font-mono font-bold">{getPrevPerformance(ex.name, sIdx)}</div>
-                    <input
-                      type="number"
-                      value={set.weight || ''}
-                      placeholder="0"
-                      onChange={(e) => updateSet(exIdx, sIdx, 'weight', parseFloat(e.target.value))}
-                      className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
-                    />
-                    <input
-                      type="number"
-                      value={set.reps || ''}
-                      placeholder="0"
-                      onChange={(e) => updateSet(exIdx, sIdx, 'reps', parseInt(e.target.value))}
-                      className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
-                    />
-                    <div className="relative group">
-                      <input
-                        type="text"
-                        value={formatTimeTaken(set.timeTaken)}
-                        placeholder="0:00"
-                        onChange={(e) => updateSet(exIdx, sIdx, 'timeTaken', parseTimeTaken(e.target.value))}
-                        className={cn(
-                          "bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-mono w-full",
-                          isTimerRunning ? "text-[#CCFF00] animate-pulse" : ""
-                        )}
-                      />
-                      {!set.completed && !isTimerRunning && (
-                        <button
-                          onClick={() => startSetTimer(exIdx, sIdx)}
-                          className="absolute inset-0 bg-zinc-800/80 rounded opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                        >
-                          <Play className="w-3 h-3 text-[#CCFF00]" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex justify-end pr-2">
-                      <button
-                        onClick={() => toggleSetComplete(exIdx, sIdx)}
-                        className={cn(
-                          "flex items-center justify-center p-1 rounded-lg transition-transform active:scale-90",
-                          set.completed ? "text-[#CCFF00]" : "text-zinc-700"
-                        )}
-                      >
-                        {set.completed ? (
-                          <CheckCircle2 className="w-6 h-6 fill-current bg-black rounded-full" />
-                        ) : (
-                          <div className="w-6 h-6 rounded-md border-2 border-zinc-700" />
-                        )}
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              })}
-
-              <button
-                onClick={() => addSet(exIdx)}
-                className="w-full py-2 rounded-xl border border-zinc-800 text-zinc-500 font-mono text-xs uppercase tracking-widest hover:bg-zinc-900 transition-colors"
-              >
-                Add Set
-              </button>
-            </div>
-          </div>
+          <ExerciseItem 
+            key={ex.sessionKey}
+            ex={ex}
+            exIdx={exIdx}
+            exercises={exercises}
+            setExercises={setExercises}
+            getPrevPerformance={getPrevPerformance}
+            updateSet={updateSet}
+            toggleSetComplete={toggleSetComplete}
+            startSetTimer={startSetTimer}
+            formatTimeTaken={formatTimeTaken}
+            parseTimeTaken={parseTimeTaken}
+            setStartTimes={setStartTimes}
+            addSet={addSet}
+          />
         ))}
 
         <button
@@ -1962,10 +2036,11 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
           <Plus className="w-5 h-5" />
           <span>Add Exercise</span>
         </button>
-      </div>
+      </Reorder.Group>
     </div>
   );
 };
+
 
 const AIAssistant = ({
   workouts,
@@ -1992,7 +2067,9 @@ const AIAssistant = ({
   const [showHistory, setShowHistory] = useState(false);
   const [summary, setSummary] = useState<string>('');
   const [isTyping, setIsTyping] = useState(false);
-  const [isListening, setIsListening] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [chatTheme, setChatTheme] = useState<'dark' | 'light'>('dark');
   const [responseTimer, setResponseTimer] = useState(0);
@@ -2148,28 +2225,55 @@ New Neural Memory:`;
     }
   };
 
-  const startListening = () => {
-    // @ts-ignore
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.error("Speech recognition not supported");
+
+
+  const toggleListening = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
 
-    recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setPrompt(transcript);
-    };
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
 
-    recognition.start();
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'audio.webm');
+        formData.append('model', 'whisper-1');
+
+        try {
+          const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+            },
+            body: formData
+          });
+          const data = await response.json();
+          if (data.text) {
+            setPrompt(prev => prev + ' ' + data.text);
+          }
+        } catch (error) {
+          console.error("Whisper transcription failed:", error);
+        }
+        
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error("Microphone access denied:", error);
+    }
   };
 
   const MESSAGE_LIMIT = 5;
@@ -2177,6 +2281,7 @@ New Neural Memory:`;
   const askAI = async () => {
     if (!prompt.trim() || !user) return;
     const userMsg = prompt;
+    const startTime = Date.now();
 
     let convId = currentConversationId;
     if (!convId) {
@@ -2194,8 +2299,12 @@ New Neural Memory:`;
     await saveMessage('user', userMsg, convId);
 
     const profileContext = profile ? `
-User Profile:
+USER PROFILE:
 - Name: ${profile.name || 'Unknown'}
+- Gender: ${profile.gender || 'Not set'}
+- Age: ${profile.age || 'Not set'}
+- Weight: ${profile.weight ? `${profile.weight}kg` : 'Not set'}
+- Height: ${profile.height ? `${profile.height}cm` : 'Not set'}
 - Primary Goal: ${profile.goal || 'Not set'}
 - Detailed Aim: ${profile.aim || 'Not set'}
 ` : "No profile data available.";
@@ -2207,11 +2316,9 @@ User Profile:
 
     const exerciseListText = EXERCISES.map(e => `${e.id}: ${e.name}`).join('\n');
 
-    const systemInstruction = `You are FitAI, a professional fitness coach.
-Always respond in Markdown. Use tables for routines.
-You coordinate with two sub-agents: CRUD (for database) and Search (for web).
-Reference Data:
+    const systemInstruction = `You are FitAI. Background data for context — use only when relevant:
 ${profileContext}
+RECENT WORKOUTS:
 ${workoutContext}
 AVAILABLE EXERCISES:
 ${exerciseListText}`;
@@ -2298,32 +2405,62 @@ ${exerciseListText}`;
       });
 
       const superiorAgent = async (state: typeof StateAnnotation.State) => {
-        const lastMsg = state.messages[state.messages.length - 1].content.toLowerCase();
-        const needsCRUD = /create|update|delete|profile|routine/i.test(lastMsg);
-        const needsSearch = /search|lookup|find|research|who is|what is/i.test(lastMsg) && !needsCRUD;
-        
-        // Simple permission check: if user said "yes" to a previous request
-        const lastBotMsg = state.messages.filter(m => m instanceof AIMessage).pop()?.content.toString().toLowerCase() || "";
-        const confirmed = /yes|proceed|do it|go ahead|confirm/i.test(lastMsg) && lastBotMsg.includes("should i proceed");
+        const lastMsg = state.messages[state.messages.length - 1];
+        const justFinishedTools = lastMsg instanceof ToolMessage;
+        const goal = profile?.goal || 'Crush it';
 
-        if (needsCRUD && !confirmed) {
-          return { messages: [new AIMessage("I can help with that. Should I proceed with the requested database operation?")] };
-        }
+        const prompt = `You are FitAI. A real person texting back — not a bot, not a coach giving lectures.
 
-        const prompt = `You are the Superior Agent. 
-        - If the user wants to manage routines/profile and has confirmed, say "DELEGATE_TO_CRUD".
-        - If the user needs external info, say "DELEGATE_TO_SEARCH".
-        - Otherwise, answer directly.`;
-        
-        const response = await model.invoke([new SystemMessage(prompt), ...state.messages]);
+USER:
+- Name: ${profile?.name || 'Unknown'} | Gender: ${profile?.gender || '?'} | Age: ${profile?.age || '?'}
+- Weight: ${profile?.weight ? `${profile.weight}kg` : '?'} | Height: ${profile?.height ? `${profile.height}cm` : '?'}
+- Goal: ${goal} | Aim: ${profile?.aim || 'Not set'}
+
+VIBE — read the message, match the energy exactly, stay 1 step above:
+- "hi" → just say hi back. maybe one chill line. NOTHING ELSE.
+- casual chat → be casual, funny, sharp. don't bring up fitness unless they do.
+- they go deep on training → go deep, be the expert.
+- they flirt or get playful → match it, keep it fun and confident.
+- they swear → you can too, naturally, don't force it.
+- they're serious → be direct and precise.
+- emojis only if the vibe calls for it. never force them.
+- NEVER volunteer fitness plans, goals, or data unless they ask. read the room.
+
+FORMAT — match the message length:
+- short message → short reply. 1-3 lines max for casual stuff.
+- fitness question → answer it properly. use Markdown tables only for structured plans/routines.
+- after tools finish: 1 line confirmation + emoji. done.
+
+ROUTING — fire whenever needed, no hesitation:
+- anything about creating/editing/deleting a routine or profile → DELEGATE_TO_CRUD
+- user confirms a plan ("do it", "yes", "save", "add", "ok", "go", "sure") → DELEGATE_TO_CRUD immediately, no re-asking
+- need outside info, research, supplements, science → DELEGATE_TO_SEARCH
+- no plan shown yet → show it first, ask "want me to save this?" → on yes → DELEGATE_TO_CRUD
+
+${justFinishedTools ? '✅ Tools just ran. Send 1 short confirmation line with emoji. Nothing more.' : ''}`;
+
+        const response = await model.invoke([new SystemMessage(prompt), ...state.messages], { tags: ["superior_response"] });
         return { messages: [response] };
       };
 
       const crudAgent = async (state: typeof StateAnnotation.State) => {
         const crudModel = model.bindTools([createRoutineTool, updateRoutineTool, deleteRoutineTool, updateProfileTool]);
         const response = await crudModel.invoke([
-          new SystemMessage("You are the CRUD Agent. Use tools to fulfill the user's request."),
-          ...state.messages.filter(m => !(m instanceof AIMessage && m.content === "DELEGATE_TO_CRUD"))
+          new SystemMessage(`You are the CRUD Agent. Execute the requested action immediately and precisely.
+
+USER STATS (use for weight calibration):
+- Body Weight: ${profile?.weight ? `${profile.weight}kg` : 'Unknown'}
+- Goal: ${profile?.goal || 'General fitness'}
+
+INTELLIGENCE:
+- Scan HISTORY before writing. For each exercise, use the MOST RECENT weight logged.
+- Exercise not in history → assign smart starter weights relative to the user's body weight and goal.
+- Always use correct exerciseId from the exercise list. Be exact with kg values.
+- Execute the tool call. No explanation needed — the Superior Agent handles communication.
+
+HISTORY:
+${workoutContext}`),
+          ...state.messages.filter(m => !(m instanceof AIMessage && m.content.toString().includes("DELEGATE_TO_CRUD")))
         ]);
         return { messages: [response] };
       };
@@ -2331,8 +2468,11 @@ ${exerciseListText}`;
       const searchAgent = async (state: typeof StateAnnotation.State) => {
         const searchModel = model.bindTools([tavilySearchTool]);
         const response = await searchModel.invoke([
-          new SystemMessage("You are the Search Agent. Use tavily_search to find info."),
-          ...state.messages.filter(m => !(m instanceof AIMessage && m.content === "DELEGATE_TO_SEARCH"))
+          new SystemMessage(`You are the Search Agent. Find the answer, return it clean.
+Use tavily_search with a precise query. Return only what's directly relevant to the user's question.
+User goal context: ${profile?.goal || 'General fitness'}. Tailor what you pull back to that context.
+No padding, no filler — the Superior Agent will handle the final response to the user.`),
+          ...state.messages.filter(m => !(m instanceof AIMessage && m.content.toString().includes("DELEGATE_TO_SEARCH")))
         ]);
         return { messages: [response] };
       };
@@ -2355,9 +2495,9 @@ ${exerciseListText}`;
         .addNode("tools", toolNode)
         .addEdge("__start__", "superior")
         .addConditionalEdges("superior", (state) => {
-          const content = state.messages[state.messages.length - 1].content;
-          if (content === "DELEGATE_TO_CRUD") return "crud";
-          if (content === "DELEGATE_TO_SEARCH") return "search";
+          const content = state.messages[state.messages.length - 1].content.toString();
+          if (content.includes("DELEGATE_TO_CRUD")) return "crud";
+          if (content.includes("DELEGATE_TO_SEARCH")) return "search";
           return "__end__";
         })
         .addConditionalEdges("crud", (state) => state.messages[state.messages.length - 1].tool_calls?.length ? "tools" : "__end__")
@@ -2366,17 +2506,44 @@ ${exerciseListText}`;
 
       const app = workflow.compile();
 
-      // 5. Execute
+      // 5. Execute with Streaming
       const history = [
         new SystemMessage(systemInstruction),
         ...messages.slice(-8).map(m => m.role === 'bot' ? new AIMessage(m.text) : new HumanMessage(m.text)),
         new HumanMessage(userMsg)
       ];
 
-      const result = await app.invoke({ messages: history });
-      const finalContent = result.messages[result.messages.length - 1].content.toString();
-      
-      setMessages(prev => [...prev, { role: 'bot', text: finalContent, timestamp: new Date() }]);
+      let finalContent = "";
+      const eventStream = app.streamEvents({ messages: history }, { version: "v2" });
+
+      for await (const event of eventStream) {
+        if (event.event === "on_chat_model_stream" && event.tags?.includes("superior_response")) {
+          const chunk = event.data.chunk.content;
+          if (chunk) {
+            const potential = finalContent + chunk;
+            if (potential.includes("DELEGATE_TO_")) {
+              finalContent = potential;
+              continue;
+            }
+            finalContent = potential;
+            setMessages(prev => {
+              const last = prev[prev.length - 1];
+              // Use startTime to ensure we update the correct "new" bot message
+              if (last && last.role === 'bot' && last.timestamp.getTime() >= startTime) {
+                const newMsgs = [...prev];
+                newMsgs[newMsgs.length - 1] = { ...last, text: finalContent };
+                return newMsgs;
+              }
+              return [...prev, { role: 'bot', text: finalContent, timestamp: new Date(startTime) }];
+            });
+          }
+        } else if (event.event === "on_chain_end" && event.name === "LangGraph") {
+          const finalState = event.data.output;
+          const lastMsg = finalState.messages[finalState.messages.length - 1];
+          finalContent = lastMsg.content.toString();
+        }
+      }
+
       if (convId) await saveMessage('bot', finalContent, convId);
 
       if (messages.length + 2 > MESSAGE_LIMIT) {
@@ -2594,13 +2761,15 @@ ${exerciseListText}`;
           />
           <div className="absolute right-3 flex items-center space-x-1">
             <button
-              onClick={startListening}
+              onClick={toggleListening}
               className={cn(
-                "p-2 rounded-lg transition-colors",
-                isListening ? "bg-red-500 text-white shadow-lg shadow-red-500/20" : (chatTheme === 'light' ? "text-zinc-400 hover:text-black" : "text-zinc-500 hover:text-white")
+                "p-2 rounded-lg transition-all duration-300",
+                isRecording 
+                  ? "bg-red-500 text-white shadow-lg shadow-red-500/40 scale-110 animate-pulse" 
+                  : (chatTheme === 'light' ? "text-zinc-400 hover:text-black" : "text-zinc-500 hover:text-white")
               )}
             >
-              <Mic className="w-5 h-5" />
+              <Mic className={cn("w-5 h-5", isRecording && "animate-bounce")} />
             </button>
             <button
               onClick={askAI}
