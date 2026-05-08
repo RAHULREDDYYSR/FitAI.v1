@@ -786,7 +786,16 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
 
     filteredWorkouts.forEach(w => {
       w.exercises.forEach(ex => {
-        const exerciseDef = EXERCISES.find(e => e.id === ex.exerciseId || e.name === ex.name);
+        let exerciseDef = EXERCISES.find(e => e.id === ex.exerciseId);
+        
+        // Fallback: If no ID match, try fuzzy name match
+        if (!exerciseDef) {
+          const cleanName = ex.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          exerciseDef = EXERCISES.find(e => 
+            e.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanName
+          );
+        }
+
         const volume = ex.sets.reduce((acc, s) => acc + (s.weight * s.reps), 0);
 
         // Use muscle_groups if available, fallback to legacy muscle field
@@ -2208,6 +2217,8 @@ User Profile:
       return `- [ID: ${r.id}] ${r.name}: ${exercises}`;
     }).join('\n');
 
+    const exerciseListText = EXERCISES.map(e => `${e.id}: ${e.name}`).join('\n');
+
     const systemInstruction = `You are FitAI, a professional, expert fitness coach. 
 
 CORE BEHAVIOR:
@@ -2219,6 +2230,7 @@ CORE BEHAVIOR:
 6. ROUTINE FORMAT: Use markdown tables for routines (with | Exercise | Sets | Reps | format).
 7. ROUTINE MANAGEMENT: Use tools to persist changes.
 8. PROFILE UPDATES: If the user explicitly tells you their name, goal, or gear, use the 'update_profile' tool to save it permanently.
+9. DATA INTEGRITY: When creating or updating routines, you MUST use the correct "exerciseId" and "name" from the "AVAILABLE EXERCISES" list below. This is critical for the user's stats to track correctly.
 
 FORMATTING RULES (MANDATORY):
 - Always respond in **Markdown** format.
@@ -2241,6 +2253,9 @@ ${routinesContext || "No routines saved yet."}
 
 User's Recent Workout History (Last ${workouts.length} sessions):
 ${workoutContext || "No history yet."}
+
+AVAILABLE EXERCISES (Format: id: name):
+${exerciseListText}
 ---`;
 
     try {
@@ -2263,7 +2278,8 @@ ${workoutContext || "No history yet."}
         schema: z.object({
           name: z.string().describe("Name of the routine (e.g. 'Push Day')"),
           exercises: z.array(z.object({
-            name: z.string(),
+            exerciseId: z.string().describe("The ID of the exercise from the provided list"),
+            name: z.string().describe("The name of the exercise from the provided list"),
             sets: z.array(z.object({
               weight: z.number(),
               reps: z.number()
@@ -2283,7 +2299,8 @@ ${workoutContext || "No history yet."}
           id: z.string().describe("The ID of the routine to update"),
           name: z.string().optional(),
           exercises: z.array(z.object({
-            name: z.string(),
+            exerciseId: z.string().describe("The ID of the exercise from the provided list"),
+            name: z.string().describe("The name of the exercise from the provided list"),
             sets: z.array(z.object({
               weight: z.number(),
               reps: z.number()
