@@ -72,6 +72,7 @@ import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from "@langchain/
 import { StateGraph, Annotation } from "@langchain/langgraph";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { traceable } from 'langsmith/traceable';
 import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import {
   LineChart,
@@ -347,7 +348,10 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                   const model = new ChatOpenAI({
                     modelName: "gpt-5.4-mini",
                     openAIApiKey: process.env.OPENAI_API_KEY,
-                    configuration: { dangerouslyAllowBrowser: true }
+                    configuration: { dangerouslyAllowBrowser: true },
+                    callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" 
+                      ? [new LangChainTracer({ projectName: process.env.LANGCHAIN_PROJECT || "FitAI" })]
+                      : undefined
                   });
 
                   const prompt = `Act as an expert fitness strategist. Refine the following user's fitness vision and aim into a professional, high-impact, and motivating primary goal.
@@ -365,8 +369,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                   const response = await model.invoke(prompt, {
                     callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" ? [
                       new LangChainTracer({
-                        projectName: process.env.LANGCHAIN_PROJECT,
-                        apiKey: process.env.LANGCHAIN_API_KEY,
+                        projectName: process.env.LANGCHAIN_PROJECT || "FitAI",
                       })
                     ] : []
                   });
@@ -775,7 +778,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
   }, {} as Record<string, number>);
 
   const radarData = useMemo(() => {
-    const categories = {
+    const categories: Record<string, number> = {
       'Back': 0,
       'Chest': 0,
       'Core': 0,
@@ -788,55 +791,65 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
       w.exercises.forEach(ex => {
         let exerciseDef = EXERCISES.find(e => e.id === ex.exerciseId);
         
-        // Fallback: If no ID match, try fuzzy name match
+        // Fallback: fuzzy name match
         if (!exerciseDef) {
           const cleanName = ex.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-          exerciseDef = EXERCISES.find(e => 
+          exerciseDef = EXERCISES.find(e =>
             e.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanName
           );
         }
 
-        const volume = ex.sets.reduce((acc, s) => acc + (s.weight * s.reps), 0);
+        const completedSets = ex.sets.filter(s => s.completed);
+        if (completedSets.length === 0) return;
 
-        // Use muscle_groups if available, fallback to legacy muscle field
+        const totalReps = completedSets.reduce((acc, s) => acc + s.reps, 0);
+        const avgWeight = completedSets.reduce((acc, s) => acc + s.weight, 0) / completedSets.length;
+
+        // ─── EFFORT SCORE FORMULA ───────────────────────────────────────────
+        // Uses logarithmic scaling so heavy AND light exercises both score fairly.
+        // log(1 + sets × reps) captures "how much work done" regardless of weight.
+        // log(1 + avgWeight + 1) adds a small weight bonus so heavier isn't penalised,
+        //   but it's logarithmic so the bonus tapers off quickly.
+        // Result: 4×15 abs ≈ 13 pts, 4×8 squats @ 160kg ≈ 17 pts — both meaningful.
+        const effortScore = Math.log1p(completedSets.length * totalReps) 
+                          * Math.log1p(avgWeight + 1);
+
         const groups = (exerciseDef?.muscle_groups && exerciseDef.muscle_groups.length > 0)
           ? exerciseDef.muscle_groups
           : [exerciseDef?.muscle || ''];
 
         groups.forEach(groupRaw => {
           const group = groupRaw.toLowerCase();
-          const weightedVolume = volume / (groups.length || 1); // Distribute volume across groups
+          const share = effortScore / (groups.length || 1);
 
           if (group.includes('back') || group.includes('lats') || group.includes('traps') || group.includes('rear delt')) {
-            categories['Back'] += weightedVolume;
-          } else if (group.includes('chest')) {
-            categories['Chest'] += weightedVolume;
-          } else if (group.includes('abdominal') || group.includes('core') || group.includes('abs') || group.includes('oblique')) {
-            categories['Core'] += weightedVolume;
-          } else if (group.includes('shoulder') || group.includes('delt')) {
-            categories['Shoulders'] += weightedVolume;
-          } else if (group.includes('bicep') || group.includes('tricep') || group.includes('arm') || group.includes('forearm')) {
-            categories['Arms'] += weightedVolume;
-          } else if (group.includes('quad') || group.includes('hamstring') || group.includes('glute') || group.includes('calve') || group.includes('leg') || group.includes('adductor') || group.includes('abductor')) {
-            categories['Legs'] += weightedVolume;
-          } else if (group.includes('full body')) {
-            const share = weightedVolume / 6;
             categories['Back'] += share;
+          } else if (group.includes('chest')) {
             categories['Chest'] += share;
+          } else if (group.includes('abdominal') || group.includes('core') || group.includes('abs') || group.includes('oblique')) {
             categories['Core'] += share;
+          } else if (group.includes('shoulder') || group.includes('delt')) {
             categories['Shoulders'] += share;
+          } else if (group.includes('bicep') || group.includes('tricep') || group.includes('arm') || group.includes('forearm')) {
             categories['Arms'] += share;
+          } else if (group.includes('quad') || group.includes('hamstring') || group.includes('glute') || group.includes('calve') || group.includes('leg') || group.includes('adductor') || group.includes('abductor')) {
             categories['Legs'] += share;
+          } else if (group.includes('full body')) {
+            const sixthShare = share / 6;
+            Object.keys(categories).forEach(k => { categories[k] += sixthShare; });
           }
         });
       });
     });
 
+    // Normalize to 0–100 so the radar always fills nicely
+    const maxVal = Math.max(...Object.values(categories), 1);
     return Object.entries(categories).map(([subject, value]) => ({
       subject,
-      value: Math.round(value)
+      value: Math.round((value / maxVal) * 100)
     }));
   }, [filteredWorkouts]);
+
 
   return (
     <div className="space-y-6 pb-24">
@@ -2049,6 +2062,8 @@ const AIAssistant = ({
   onCreateRoutine,
   onUpdateRoutine,
   onDeleteRoutine,
+  onListRoutines,
+  onGetRoutine,
   onUpdateProfile
 }: {
   workouts: WorkoutLog[],
@@ -2057,6 +2072,8 @@ const AIAssistant = ({
   onCreateRoutine: (data: any) => Promise<any>,
   onUpdateRoutine: (id: string, data: any) => Promise<any>,
   onDeleteRoutine: (id: string) => Promise<any>,
+  onListRoutines: () => Promise<any[]>,
+  onGetRoutine: (id: string) => Promise<any>,
   onUpdateProfile: (data: any) => Promise<any>
 }) => {
   const { user } = useAuth();
@@ -2073,6 +2090,7 @@ const AIAssistant = ({
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [chatTheme, setChatTheme] = useState<'dark' | 'light'>('dark');
   const [responseTimer, setResponseTimer] = useState(0);
+  const [agentStatus, setAgentStatus] = useState<'thinking' | 'crud' | 'search' | 'tools' | 'responding'>('thinking');
 
   useEffect(() => {
     let interval: any;
@@ -2153,6 +2171,31 @@ const AIAssistant = ({
     setShowHistory(false);
   };
 
+  const deleteConversation = async (convId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // prevent triggering the conversation select
+    if (!user) return;
+    try {
+      // 1. Delete all messages inside the conversation
+      const msgsSnap = await getDocs(
+        collection(db, 'users', user.uid, 'conversations', convId, 'messages')
+      );
+      await Promise.all(msgsSnap.docs.map(d => deleteDoc(d.ref)));
+
+      // 2. Delete the conversation document itself
+      await deleteDoc(doc(db, 'users', user.uid, 'conversations', convId));
+
+      // 3. If the deleted conv was active, start a new chat
+      if (currentConversationId === convId) {
+        startNewChat();
+      }
+
+      // 4. Neural context stays intact — the summary in Firestore is NOT deleted.
+      // It will automatically incorporate remaining conversations next time summarization runs.
+    } catch (e) {
+      console.error('Failed to delete conversation:', e);
+    }
+  };
+
   const saveMessage = async (role: 'user' | 'bot', text: string, convId: string) => {
     if (!user) return;
     const path = `users/${user.uid}/conversations/${convId}/messages`;
@@ -2186,7 +2229,10 @@ const AIAssistant = ({
       const model = new ChatOpenAI({
         modelName: "gpt-5.4-mini",
         openAIApiKey: process.env.OPENAI_API_KEY,
-        configuration: { dangerouslyAllowBrowser: true }
+        configuration: { dangerouslyAllowBrowser: true },
+        callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" 
+          ? [new LangChainTracer({ projectName: process.env.LANGCHAIN_PROJECT || "FitAI" })]
+          : undefined
       });
 
       const promptText = `Analyze the following chat history and update the "Neural Memory".
@@ -2198,17 +2244,17 @@ New Messages:
 ${msgs.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n')}
 
 Rules:
-- Synthesize key information (new goals, preferences, physical issues)
-- Keep it under 200 words
-- Maintain a structured, informative tone
+- Synthesize key information: new goals, preferences, physical issues, and RECENTLY DISCUSSED ROUTINES or SEARCH TOPICS.
+- Keep it under 200 words.
+- Maintain a structured, informative tone.
+- Capture routine IDs if mentioned, to help future CRUD operations.
 
 New Neural Memory:`;
 
       const response = await model.invoke(promptText, {
         callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" ? [
           new LangChainTracer({
-            projectName: process.env.LANGCHAIN_PROJECT,
-            apiKey: process.env.LANGCHAIN_API_KEY,
+            projectName: process.env.LANGCHAIN_PROJECT || "FitAI",
           })
         ] : []
       });
@@ -2309,10 +2355,17 @@ USER PROFILE:
 - Detailed Aim: ${profile.aim || 'Not set'}
 ` : "No profile data available.";
 
-    const workoutContext = workouts.map(w => {
-      const date = format(new Date(w.date.seconds * 1000), 'MMM d');
-      return `[${date}] ${w.name} (${w.totalVolume}kg)`;
-    }).join('\n');
+    const workoutContext = workouts.slice(0, 10).map(w => {
+      const date = format(new Date(w.date.seconds * 1000), 'MMM d yyyy');
+      const exerciseDetail = w.exercises.map(ex => {
+        const setsDetail = ex.sets
+          .filter(s => s.completed)
+          .map((s, i) => `Set${i+1}: ${s.weight}kg x ${s.reps}reps`)
+          .join(', ');
+        return `  • ${ex.name}: ${setsDetail}`;
+      }).join('\n');
+      return `[${date}] ${w.name} (Total Volume: ${w.totalVolume}kg, Duration: ${w.duration}min)\n${exerciseDetail}`;
+    }).join('\n\n');
 
     const exerciseListText = EXERCISES.map(e => `${e.id}: ${e.name}`).join('\n');
 
@@ -2324,26 +2377,32 @@ AVAILABLE EXERCISES:
 ${exerciseListText}`;
 
     try {
-      // 1. Models
+      // ─────────────────────────────────────────────────────
+      // 1. MODEL
+      // ─────────────────────────────────────────────────────
       const model = new ChatOpenAI({
-        modelName: "gpt-5.4-mini",
+        modelName: "gpt-4o-mini",
         openAIApiKey: process.env.OPENAI_API_KEY,
-        configuration: { dangerouslyAllowBrowser: true }
+        configuration: { dangerouslyAllowBrowser: true },
+        // Disabling tracing as it's causing 403 errors and potentially blocking execution
+        callbacks: []
       });
 
-      // 2. Tools
+      // ─────────────────────────────────────────────────────
+      // 2. TOOLS
+      // ─────────────────────────────────────────────────────
       const createRoutineTool = tool(async (args) => {
         await onCreateRoutine(args);
-        return "Routine created successfully.";
+        return JSON.stringify({ success: true, action: "create", name: args.name, exerciseCount: args.exercises?.length ?? 0 });
       }, {
         name: "create_routine",
-        description: "Create a new workout routine",
+        description: "Create a brand-new workout routine for the user with exercises and sets.",
         schema: z.object({
-          name: z.string(),
+          name: z.string().describe("Name of the routine"),
           exercises: z.array(z.object({
-            exerciseId: z.string(),
-            name: z.string(),
-            sets: z.array(z.object({ weight: z.number(), reps: z.number() }))
+            exerciseId: z.string().describe("Exact exercise ID from the exercise list"),
+            name: z.string().describe("Human-readable exercise name"),
+            sets: z.array(z.object({ weight: z.number().describe("Weight in kg"), reps: z.number().describe("Number of reps") }))
           }))
         })
       });
@@ -2351,12 +2410,12 @@ ${exerciseListText}`;
       const updateRoutineTool = tool(async (args) => {
         // @ts-ignore
         await onUpdateRoutine(args.id, args);
-        return "Routine updated successfully.";
+        return JSON.stringify({ success: true, action: "update", id: args.id, name: args.name });
       }, {
         name: "update_routine",
-        description: "Update an existing routine",
+        description: "Update an existing routine by its ID. Call list_routines first if you only have a name.",
         schema: z.object({
-          id: z.string(),
+          id: z.string().describe("Firestore document ID of the routine"),
           name: z.string().optional(),
           exercises: z.array(z.object({
             exerciseId: z.string(),
@@ -2369,191 +2428,480 @@ ${exerciseListText}`;
       const deleteRoutineTool = tool(async (args) => {
         // @ts-ignore
         await onDeleteRoutine(args.id);
-        return "Routine deleted successfully.";
+        return JSON.stringify({ success: true, action: "delete", id: args.id });
       }, {
         name: "delete_routine",
-        description: "Delete an existing routine",
-        schema: z.object({ id: z.string() })
+        description: "Permanently delete a routine by its ID. Call list_routines first to find the ID from a name.",
+        schema: z.object({ id: z.string(), name: z.string().optional().describe("Human name for confirmation messaging") })
+      });
+
+      const listRoutinesTool = tool(async () => {
+        // @ts-ignore
+        const allRoutines = await onListRoutines();
+        return JSON.stringify(
+          (allRoutines || []).map((r: any) => ({
+            id: r.id,
+            name: r.name,
+            exerciseCount: r.exercises?.length ?? 0,
+            exercises: (r.exercises || []).map((e: any) => e.name)
+          }))
+        );
+      }, {
+        name: "list_routines",
+        description: "Fetch all workout routines belonging to the user. Returns IDs, names and exercise counts. Always call this before update/delete when you only have a routine name.",
+        schema: z.object({})
+      });
+
+      const getRoutineTool = tool(async (args) => {
+        // @ts-ignore
+        const routine = await onGetRoutine(args.id);
+        return JSON.stringify(routine);
+      }, {
+        name: "get_routine",
+        description: "Fetch the full details of a specific routine by its Firestore ID — exercises, sets, reps, weights.",
+        schema: z.object({ id: z.string().describe("Firestore document ID returned by list_routines") })
       });
 
       const updateProfileTool = tool(async (args) => {
         await onUpdateProfile(args);
-        return "Profile updated successfully.";
+        return JSON.stringify({ success: true, action: "profile_update", fields: Object.keys(args) });
       }, {
         name: "update_profile",
-        description: "Update user profile",
-        schema: z.object({ goal: z.string().optional(), weight: z.number().optional() })
+        description: "Update the user's profile — goal, weight, age, etc.",
+        schema: z.object({
+          goal: z.string().optional(),
+          aim: z.string().optional(),
+          weight: z.number().optional(),
+          age: z.number().optional()
+        })
       });
 
+      const listWorkoutsTool = tool(async () => {
+        const recentWorkouts = workouts.slice(0, 15).map(w => ({
+          id: w.id,
+          name: w.name,
+          date: w.date?.seconds ? format(new Date(w.date.seconds * 1000), 'MMM d yyyy') : 'Unknown date',
+          totalVolume: w.totalVolume,
+          duration: w.duration,
+          exerciseCount: w.exercises.length
+        }));
+        return JSON.stringify(recentWorkouts);
+      }, {
+        name: "list_workouts",
+        description: "List recent workout sessions (actual performed sessions, NOT routine templates). Use when user asks about workout history, how many workouts completed, or which days they trained.",
+        schema: z.object({ limit: z.number().optional().describe("Max number of workouts to return, default 15") })
+      });
+
+      const getWorkoutLogTool = tool(async ({ id, name }) => {
+        let workout = workouts.find(w => w.id === id);
+        if (!workout && name) {
+          workout = workouts.find(w => w.name.toLowerCase().includes(name.toLowerCase()));
+        }
+        if (!workout) return JSON.stringify({ error: `Workout not found. Call list_workouts first to see available sessions.` });
+        return JSON.stringify({
+          id: workout.id,
+          name: workout.name,
+          date: workout.date?.seconds ? format(new Date(workout.date.seconds * 1000), 'MMM d yyyy') : 'Unknown',
+          duration: workout.duration,
+          totalVolume: workout.totalVolume,
+          exercises: workout.exercises.map(ex => ({
+            name: ex.name,
+            sets: ex.sets.filter(s => s.completed).map((s, i) => ({
+              setNumber: i + 1,
+              weight: s.weight,
+              reps: s.reps
+            }))
+          }))
+        });
+      }, {
+        name: "get_workout_log",
+        description: "Get full details of a specific performed workout session: all exercises with actual sets, reps, and weights logged. Use when user asks 'what did I do in X workout' or 'show me my Y session details'.",
+        schema: z.object({
+          id: z.string().optional().describe("Workout session ID from list_workouts"),
+          name: z.string().optional().describe("Workout name to search by (e.g. 'Quads-Focused Lower Day')")
+        })
+      });
+
+      // Two Tavily tools: one for web, one specifically for YouTube
       const tavilySearchTool = tool(async ({ query }) => {
         const response = await fetch('https://api.tavily.com/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: process.env.TAVILY_API_KEY, query, search_depth: 'basic' })
+          body: JSON.stringify({ api_key: process.env.TAVILY_API_KEY, query, search_depth: 'basic', max_results: 5 })
         });
         const data = await response.json();
-        return JSON.stringify(data.results.map((r: any) => ({ title: r.title, content: r.content })));
+        return JSON.stringify((data.results || []).slice(0, 5).map((r: any) => ({ title: r.title, content: r.content, url: r.url })));
       }, {
         name: "tavily_search",
-        description: "Search web for fitness info",
-        schema: z.object({ query: z.string() })
+        description: "Search the web for fitness knowledge: exercise science, nutrition, supplements, injury info, form guides, training methodology.",
+        schema: z.object({ query: z.string().describe("Precise search query") })
       });
 
-      // 3. LangGraph Nodes
+      const tavilyYouTubeTool = tool(async ({ query }) => {
+        const ytQuery = `${query} site:youtube.com/shorts OR site:youtube.com/watch`;
+        const response = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: process.env.TAVILY_API_KEY, query: ytQuery, search_depth: 'basic', max_results: 5 })
+        });
+        const data = await response.json();
+        const ytResults = (data.results || []).filter((r: any) => r.url?.includes('youtube.com')).slice(0, 3);
+        return JSON.stringify(ytResults.map((r: any) => ({ title: r.title, url: r.url })));
+      }, {
+        name: "youtube_search",
+        description: "Search YouTube for video demonstrations, shorts, or tutorials for an exercise or fitness topic.",
+        schema: z.object({ query: z.string().describe("Exercise or topic to find YouTube videos for") })
+      });
+
+
+      // ─────────────────────────────────────────────────────
+      // 3. STATE GRAPH ANNOTATION
+      // ─────────────────────────────────────────────────────
       const StateAnnotation = Annotation.Root({
-        messages: Annotation<any[]>({ reducer: (x, y) => x.concat(y) }),
+        messages: Annotation<any[]>({ reducer: (x: any[], y: any[]) => x.concat(y) }),
       });
 
+      // ─────────────────────────────────────────────────────
+      // 4. AGENT NODES
+      // ─────────────────────────────────────────────────────
+
+      /**
+       * SUPERIOR AGENT — The face of FitAI. Routes to sub-agents or answers directly.
+       * On second invocation (after a sub-agent ran), synthesises results for the user.
+       */
       const superiorAgent = async (state: typeof StateAnnotation.State) => {
-        const lastMsg = state.messages[state.messages.length - 1];
-        const justFinishedTools = lastMsg instanceof ToolMessage;
-        const goal = profile?.goal || 'Crush it';
+        const allMessages = state.messages;
 
-        const prompt = `You are FitAI. A real person texting back — not a bot, not a coach giving lectures.
+        // Detect if we're returning from a sub-agent by checking if any prior AIMessage
+        // (non-tool-call) has a delegation signal — meaning we already dispatched.
+        const hasAlreadyDelegated = allMessages.some(
+          (m: any) =>
+            // Using more robust type check instead of instanceof
+            (m._getType?.() === "ai" || m.role === "assistant") &&
+            !(m.tool_calls?.length) &&
+            (m.content?.toString().includes("DELEGATE_TO_CRUD") ||
+              m.content?.toString().includes("DELEGATE_TO_SEARCH"))
+        );
 
-USER:
-- Name: ${profile?.name || 'Unknown'} | Gender: ${profile?.gender || '?'} | Age: ${profile?.age || '?'}
-- Weight: ${profile?.weight ? `${profile.weight}kg` : '?'} | Height: ${profile?.height ? `${profile.height}cm` : '?'}
-- Goal: ${goal} | Aim: ${profile?.aim || 'Not set'}
+        const superiorPrompt = hasAlreadyDelegated
+          ? `You are FitAI — a high-performance fitness coach. The sub-agent has finished its task and results are in the conversation history.
 
-VIBE — read the message, match the energy exactly, stay 1 step above:
-- "hi" → just say hi back. maybe one chill line. NOTHING ELSE.
-- casual chat → be casual, funny, sharp. don't bring up fitness unless they do.
-- they go deep on training → go deep, be the expert.
-- they flirt or get playful → match it, keep it fun and confident.
-- they swear → you can too, naturally, don't force it.
-- they're serious → be direct and precise.
-- emojis only if the vibe calls for it. never force them.
-- NEVER volunteer fitness plans, goals, or data unless they ask. read the room.
+PRESENT the results to the user in clean Markdown. Do NOT ask clarifying questions.
 
-FORMAT — match the message length:
-- short message → short reply. 1-3 lines max for casual stuff.
-- fitness question → answer it properly. use Markdown tables only for structured plans/routines.
-- after tools finish: 1 line confirmation + emoji. done.
+FORMAT RULES:
+- Routines listed → Markdown table: | Name | Exercise Count | Exercises |
+- Routine details → Table: | Exercise | Sets | Reps | Weight |
+- Create/Update/Delete → Confirm with ✅ and summarize what changed
+- Search results → Structured answer with:
+  1. Key explanation in plain language
+  2. Bullet points for tips/steps
+  3. A "📚 Sources" section at the end with clickable Markdown links: [Title](url)
+  4. A "🎬 Watch" section (only if YouTube links exist) with clickable links: [Title](url)
 
-ROUTING — fire whenever needed, no hesitation:
-- anything about creating/editing/deleting a routine or profile → DELEGATE_TO_CRUD
-- user confirms a plan ("do it", "yes", "save", "add", "ok", "go", "sure") → DELEGATE_TO_CRUD immediately, no re-asking
-- need outside info, research, supplements, science → DELEGATE_TO_SEARCH
-- no plan shown yet → show it first, ask "want me to save this?" → on yes → DELEGATE_TO_CRUD
+DO NOT output DELEGATE_TO_CRUD or DELEGATE_TO_SEARCH. Present the results NOW.`
+          : `You are FitAI — a fitness coach that routes requests to specialized agents.
 
-${justFinishedTools ? '✅ Tools just ran. Send 1 short confirmation line with emoji. Nothing more.' : ''}`;
+━━━ ROUTING RULES (MUST FOLLOW EXACTLY) ━━━
 
-        const response = await model.invoke([new SystemMessage(prompt), ...state.messages], { tags: ["superior_response"] });
+OUTPUT ONLY "DELEGATE_TO_CRUD" if the user message involves:
+  • Listing / showing / viewing their saved workouts, routines, or plans
+  • Getting details of a specific workout routine they have saved
+  • Creating, adding, updating, editing, deleting their workouts/routines
+  • Their profile data (weight, goal, fitness level)
+
+EXAMPLES → DELEGATE_TO_CRUD:
+  "list my workouts" → DELEGATE_TO_CRUD
+  "list the workouts i have planned" → DELEGATE_TO_CRUD
+  "what workouts do i have" → DELEGATE_TO_CRUD
+  "show me my planned workouts" → DELEGATE_TO_CRUD
+  "how many routines are saved" → DELEGATE_TO_CRUD
+  "add an arms workout" → DELEGATE_TO_CRUD
+  "delete leg day" → DELEGATE_TO_CRUD
+
+OUTPUT ONLY "DELEGATE_TO_SEARCH" if the user asks for:
+  • How to perform an exercise (form, technique, tutorial)
+  • Explanation of an exercise (muscles worked, benefits)
+  • Fitness science, nutrition, supplements, injury prevention
+  • Anything that requires searching the internet for knowledge
+
+EXAMPLES → DELEGATE_TO_SEARCH:
+  "how to do hack squats" → DELEGATE_TO_SEARCH
+  "what muscles does deadlift work" → DELEGATE_TO_SEARCH
+  "best diet for muscle gain" → DELEGATE_TO_SEARCH
+  "how to fix knee pain from squats" → DELEGATE_TO_SEARCH
+
+RESPOND DIRECTLY only for pure greetings: "hi", "hey coach", "hello"
+
+RULE: Personal saved data → DELEGATE_TO_CRUD. Exercise knowledge/how-tos → DELEGATE_TO_SEARCH.`;
+
+        const response = await model.invoke([new SystemMessage(superiorPrompt), ...allMessages], { callbacks: [] });
         return { messages: [response] };
       };
+
+      /**
+       * CRUD AGENT — ReAct loop that chains tool calls autonomously.
+       * Will keep calling tools until the model stops requesting them.
+       */
+      const crudTools = [
+        createRoutineTool, updateRoutineTool, deleteRoutineTool,
+        listRoutinesTool, getRoutineTool, updateProfileTool,
+        listWorkoutsTool, getWorkoutLogTool  // Workout log tools for history queries
+      ];
+      const crudModel = model.bindTools(crudTools);
 
       const crudAgent = async (state: typeof StateAnnotation.State) => {
-        const crudModel = model.bindTools([createRoutineTool, updateRoutineTool, deleteRoutineTool, updateProfileTool]);
-        const response = await crudModel.invoke([
-          new SystemMessage(`You are the CRUD Agent. Execute the requested action immediately and precisely.
+        // Strip delegation signals from context (noise for CRUD)
+        const cleanMessages: any[] = state.messages.filter(
+          (m: any) => !( (m._getType?.() === "ai" || m.role === "assistant") && !(m.tool_calls?.length) &&
+            (m.content?.toString().includes("DELEGATE_TO_CRUD") || m.content?.toString().includes("DELEGATE_TO_SEARCH")))
+        );
 
-USER STATS (use for weight calibration):
-- Body Weight: ${profile?.weight ? `${profile.weight}kg` : 'Unknown'}
-- Goal: ${profile?.goal || 'General fitness'}
+        const crudPrompt = `You are the CRUD Agent for FitAI. You manage routines, profile data, and workout history.
+        
+━━━ YOUR TOOLS ━━━
+• list_routines, get_routine, create_routine, update_routine, delete_routine — for saved routine TEMPLATES
+• list_workouts, get_workout_log — for actual PERFORMED workout session history
+• update_profile — for profile changes
 
-INTELLIGENCE:
-- Scan HISTORY before writing. For each exercise, use the MOST RECENT weight logged.
-- Exercise not in history → assign smart starter weights relative to the user's body weight and goal.
-- Always use correct exerciseId from the exercise list. Be exact with kg values.
-- Execute the tool call. No explanation needed — the Superior Agent handles communication.
+━━━ CRITICAL DISTINCTION ━━━
+• "Routines" = saved workout PLANS/TEMPLATES (not yet done)
+• "Workout logs" = sessions the user has ACTUALLY PERFORMED and recorded
+• If user asks "what did I do in X", "show my workout history", "how many workouts" → use list_workouts / get_workout_log
+• If user asks "my routines", "workout plans", "training templates" → use list_routines / get_routine
 
-HISTORY:
-${workoutContext}`),
-          ...state.messages.filter(m => !(m instanceof AIMessage && m.content.toString().includes("DELEGATE_TO_CRUD")))
-        ]);
-        return { messages: [response] };
-      };
+━━━ AUTONOMOUS RESOLUTION ━━━
+• ALWAYS call list_workouts first if you need to find a session by name. Then use the ID for get_workout_log.
+• ALWAYS call list_routines first if you need to find a routine by name. Then use the ID for get/update/delete.
+• Chain as many tool calls as needed. Do NOT stop until the task is fully completed.
+• When creating routines, use the user's weight and goal to set intelligent defaults.
 
-      const searchAgent = async (state: typeof StateAnnotation.State) => {
-        const searchModel = model.bindTools([tavilySearchTool]);
-        const response = await searchModel.invoke([
-          new SystemMessage(`You are the Search Agent. Find the answer, return it clean.
-Use tavily_search with a precise query. Return only what's directly relevant to the user's question.
-User goal context: ${profile?.goal || 'General fitness'}. Tailor what you pull back to that context.
-No padding, no filler — the Superior Agent will handle the final response to the user.`),
-          ...state.messages.filter(m => !(m instanceof AIMessage && m.content.toString().includes("DELEGATE_TO_SEARCH")))
-        ]);
-        return { messages: [response] };
-      };
+━━━ WEIGHT LOGIC ━━━
+Goal: ${profile?.goal || 'General'} | User Weight: ${profile?.weight || 70}kg
+- Use bodyweight-relative percentages for defaults.
 
-      const toolNode = async (state: typeof StateAnnotation.State) => {
-        const lastMsg = state.messages[state.messages.length - 1];
-        const results = [];
-        for (const call of lastMsg.tool_calls || []) {
-          const t = [createRoutineTool, updateRoutineTool, deleteRoutineTool, updateProfileTool, tavilySearchTool].find(x => x.name === call.name);
-          if (t) results.push(await t.invoke(call));
+━━━ OUTPUT ━━━
+After completing all tool calls, provide a clear summary of what you did so the Superior Agent can synthesize a response.`;
+
+        // ReAct loop: keep calling tools until the model is done
+        const loopMessages: any[] = [new SystemMessage(crudPrompt), ...cleanMessages];
+        const MAX_ITERATIONS = 6;
+        let iterations = 0;
+        while (iterations < MAX_ITERATIONS) {
+          iterations++;
+          const response = await crudModel.invoke(loopMessages, { callbacks: [] });
+          loopMessages.push(response);
+          // If no more tool calls, we're done
+          if (!response.tool_calls || response.tool_calls.length === 0) break;
+          // Execute each tool call and add results to messages
+          for (const call of response.tool_calls) {
+            const t = crudTools.find((x) => x.name === call.name);
+            if (t) {
+              const content = await t.invoke(call, { callbacks: [] });
+              loopMessages.push(new ToolMessage({
+                tool_call_id: call.id,
+                content: typeof content === "string" ? content : JSON.stringify(content)
+              }));
+            }
+          }
         }
-        return { messages: results };
+
+        // Return only new messages (the ones we added in this run)
+        const newMessages = loopMessages.slice(cleanMessages.length + 1); // skip system + existing
+        return { messages: newMessages };
       };
 
-      // 4. Graph Construction
+      /**
+       * SEARCH AGENT — ReAct loop for web + YouTube search.
+       * Performs two searches: one for web knowledge, one for YouTube video links.
+       */
+      const searchAgent = async (state: typeof StateAnnotation.State) => {
+        const searchModel = model.bindTools([tavilySearchTool, tavilyYouTubeTool]);
+        const cleanMessages: any[] = state.messages.filter(
+          (m: any) => !( (m._getType?.() === "ai" || m.role === "assistant") && !(m.tool_calls?.length) &&
+            (m.content?.toString().includes("DELEGATE_TO_CRUD") || m.content?.toString().includes("DELEGATE_TO_SEARCH")))
+        );
+
+        // Determine if user explicitly asked for YouTube or is asking how to do an exercise
+        const lastUserMsg = cleanMessages.filter((m: any) => m._getType?.() === "human" || m.role === "user").pop();
+        const lastUserText = lastUserMsg?.content?.toString() || "";
+        const wantsYouTube = /youtube|video|watch|shorts|tutorial|how to do|how do i do|show me how/i.test(lastUserText);
+
+        const searchPrompt = `You are the Search Agent for FitAI. You retrieve fitness knowledge from the web.
+
+━━━ SEARCH STRATEGY ━━━
+1. ALWAYS call tavily_search first with a precise query about the topic.
+${wantsYouTube ? '2. ALSO call youtube_search to find video tutorials/shorts for the topic.' : '2. Only call youtube_search if the user explicitly asked for videos, demonstrations, or YouTube links.'}
+3. After getting results, write a STRUCTURED SUMMARY.
+
+━━━ OUTPUT FORMAT ━━━
+Provide your summary in this exact format:
+
+KEY_INFO:
+[2-4 sentence plain-language explanation of the topic]
+
+TIPS:
+- [actionable tip 1]
+- [actionable tip 2]
+- [etc]
+
+SOURCES:
+[title1]||[url1]
+[title2]||[url2]
+
+YOUTUBE:
+[video title1]||[youtube_url1]
+[video title2]||[youtube_url2]
+(Leave YOUTUBE section empty if no youtube results found)
+
+━━━ CONTEXT ━━━
+User Goal: ${profile?.goal || 'General Fitness'}`;
+
+        const loopMessages: any[] = [new SystemMessage(searchPrompt), ...cleanMessages];
+        const MAX_ITERATIONS = 4;
+        let iterations = 0;
+        while (iterations < MAX_ITERATIONS) {
+          iterations++;
+          const response = await searchModel.invoke(loopMessages, { callbacks: [] });
+          loopMessages.push(response);
+          if (!response.tool_calls || response.tool_calls.length === 0) break;
+          for (const call of response.tool_calls) {
+            let toolResult = "";
+            if (call.name === "tavily_search") {
+              toolResult = await tavilySearchTool.invoke(call, { callbacks: [] });
+            } else if (call.name === "youtube_search") {
+              toolResult = await tavilyYouTubeTool.invoke(call, { callbacks: [] });
+            }
+            if (toolResult) {
+              loopMessages.push(new ToolMessage({
+                tool_call_id: call.id,
+                content: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult)
+              }));
+            }
+          }
+        }
+
+        const newMessages = loopMessages.slice(cleanMessages.length + 1);
+        return { messages: newMessages };
+      };
+
+      // ─────────────────────────────────────────────────────
+      // 5. ROUTING LOGIC
+      // ─────────────────────────────────────────────────────
+
+      /**
+       * Route from Superior:
+       * - If we've already delegated once and Superior is now responding → END
+       * - Otherwise check delegation signals
+       */
+      const routeFromSuperior = (state: typeof StateAnnotation.State) => {
+        const msgs = state.messages;
+        const lastContent = msgs[msgs.length - 1].content.toString();
+
+        // Count prior delegation signals
+        const delegationCount = msgs.filter(
+          (m: any) =>
+            (m._getType?.() === "ai" || m.role === "assistant" || m.constructor?.name === "AIMessage") &&
+            !(m.tool_calls?.length) &&
+            (m.content?.toString().includes("DELEGATE_TO_CRUD") ||
+              m.content?.toString().includes("DELEGATE_TO_SEARCH"))
+        ).length;
+
+        // If we've already gone through a delegation cycle and this is the final response → END
+        if (delegationCount >= 1 && !lastContent.includes("DELEGATE_TO_")) return "__end__";
+        if (lastContent.includes("DELEGATE_TO_CRUD")) return "crud";
+        if (lastContent.includes("DELEGATE_TO_SEARCH")) return "search";
+        return "__end__";
+      };
+
+
+      // ─────────────────────────────────────────────────────
+      // 6. BUILD & COMPILE GRAPH
+      // ─────────────────────────────────────────────────────
+      // Note: crud and search agents now handle tool execution internally
+      // in their own ReAct loops, so no separate tool nodes are needed.
       const workflow = new StateGraph(StateAnnotation)
         .addNode("superior", superiorAgent)
         .addNode("crud", crudAgent)
         .addNode("search", searchAgent)
-        .addNode("tools", toolNode)
         .addEdge("__start__", "superior")
-        .addConditionalEdges("superior", (state) => {
-          const content = state.messages[state.messages.length - 1].content.toString();
-          if (content.includes("DELEGATE_TO_CRUD")) return "crud";
-          if (content.includes("DELEGATE_TO_SEARCH")) return "search";
-          return "__end__";
-        })
-        .addConditionalEdges("crud", (state) => state.messages[state.messages.length - 1].tool_calls?.length ? "tools" : "__end__")
-        .addConditionalEdges("search", (state) => state.messages[state.messages.length - 1].tool_calls?.length ? "tools" : "__end__")
-        .addEdge("tools", "superior");
+        .addConditionalEdges("superior", routeFromSuperior)
+        .addEdge("crud", "superior")     // After CRUD finishes its loop → back to Superior
+        .addEdge("search", "superior");  // After Search finishes its loop → back to Superior
 
       const app = workflow.compile();
 
-      // 5. Execute with Streaming
+      // ─────────────────────────────────────────────────────
+      // 8. HISTORY — last 10 turns for in-conversation memory
+      // ─────────────────────────────────────────────────────
       const history = [
         new SystemMessage(systemInstruction),
-        ...messages.slice(-8).map(m => m.role === 'bot' ? new AIMessage(m.text) : new HumanMessage(m.text)),
+        ...messages.slice(-10).map((m) =>
+          m.role === 'bot' ? new AIMessage(m.text) : new HumanMessage(m.text)
+        ),
         new HumanMessage(userMsg)
       ];
 
+      // ─────────────────────────────────────────────────────
+      // 9. INVOKE GRAPH & EXTRACT RESPONSE
+      // ─────────────────────────────────────────────────────
       let finalContent = "";
-      const eventStream = app.streamEvents({ messages: history }, { version: "v2" });
 
-      for await (const event of eventStream) {
-        if (event.event === "on_chat_model_stream" && event.tags?.includes("superior_response")) {
-          const chunk = event.data.chunk.content;
-          if (chunk) {
-            const potential = finalContent + chunk;
-            if (potential.includes("DELEGATE_TO_")) {
-              finalContent = potential;
-              continue;
-            }
-            finalContent = potential;
-            setMessages(prev => {
-              const last = prev[prev.length - 1];
-              // Use startTime to ensure we update the correct "new" bot message
-              if (last && last.role === 'bot' && last.timestamp.getTime() >= startTime) {
-                const newMsgs = [...prev];
-                newMsgs[newMsgs.length - 1] = { ...last, text: finalContent };
-                return newMsgs;
-              }
-              return [...prev, { role: 'bot', text: finalContent, timestamp: new Date(startTime) }];
-            });
+      // Show a thinking indicator
+      setMessages((prev) => [
+        ...prev,
+        { role: 'bot', text: '...', timestamp: new Date(startTime) },
+      ]);
+
+      // Run the entire graph to completion
+      const result = await app.invoke({ messages: history }, { callbacks: [] });
+      
+      // Extract the final response: walk the messages array in reverse and
+      // find the first AIMessage that is NOT a delegation signal
+      const allResultMessages: any[] = result?.messages || [];
+      for (let i = allResultMessages.length - 1; i >= 0; i--) {
+        const m = allResultMessages[i];
+        const msgType = m._getType?.() || m.role || m.constructor?.name;
+        const isAI = msgType === "ai" || msgType === "assistant" || msgType === "AIMessage";
+        if (isAI && !m.tool_calls?.length) {
+          const content = m.content?.toString() || "";
+          if (!content.includes("DELEGATE_TO_") && content.trim().length > 0) {
+            finalContent = content;
+            break;
           }
-        } else if (event.event === "on_chain_end" && event.name === "LangGraph") {
-          const finalState = event.data.output;
-          const lastMsg = finalState.messages[finalState.messages.length - 1];
-          finalContent = lastMsg.content.toString();
         }
       }
 
-      if (convId) await saveMessage('bot', finalContent, convId);
+      // Update the message in the UI with the real content
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'bot' && last.timestamp.getTime() >= startTime) {
+          return [
+            ...prev.slice(0, -1),
+            { ...last, text: finalContent || "I processed your request!" },
+          ];
+        }
+        return [...prev, { role: 'bot', text: finalContent || "I processed your request!", timestamp: new Date(startTime) }];
+      });
+      
+      setAgentStatus('thinking');
+
+
+      // ─────────────────────────────────────────────────────
+      // 10. PERSIST & SUMMARIZE
+      // ─────────────────────────────────────────────────────
+      if (convId && finalContent) {
+        await saveMessage('bot', finalContent, convId);
+      }
 
       if (messages.length + 2 > MESSAGE_LIMIT) {
         summarizeConversation([...messages, newMsg, { role: 'bot', text: finalContent, timestamp: new Date() }]);
       }
     } catch (e: any) {
       console.error("Coach Error:", e);
-      setMessages(prev => [...prev, { role: 'bot', text: `Coach Error: ${e.message}`, timestamp: new Date() }]);
+      setMessages(prev => [...prev, { role: 'bot', text: `Sorry, something went wrong: ${e.message}`, timestamp: new Date() }]);
     } finally {
       setIsTyping(false);
+      setAgentStatus('thinking');
     }
   };
 
@@ -2643,34 +2991,45 @@ No padding, no filler — the Superior Agent will handle the final response to t
                   <p className="text-xs">No past conversations yet</p>
                 </div>
               ) : (
-                conversations.map(conv => (
-                  <button
-                    key={conv.id}
-                    onClick={() => {
-                      setCurrentConversationId(conv.id);
-                      setShowHistory(false);
-                    }}
-                    className={cn(
-                      "w-full text-left p-4 rounded-2xl border transition-all",
-                      currentConversationId === conv.id
-                        ? "bg-[#CCFF00] border-[#CCFF00] text-black"
-                        : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold truncate pr-2">{conv.title}</span>
-                      <span className="text-[8px] opacity-60 font-mono">
-                        {conv.updatedAt?.seconds ? format(new Date(conv.updatedAt.seconds * 1000), 'MMM d') : 'Recent'}
-                      </span>
-                    </div>
-                    <p className={cn(
-                      "text-[10px] truncate",
-                      currentConversationId === conv.id ? "text-black/70" : "text-zinc-600"
-                    )}>
-                      {conv.lastMessage}
-                    </p>
-                  </button>
-                ))
+                <>
+                  {conversations.map(conv => (
+                  <div key={conv.id} className="relative group">
+                    <button
+                      onClick={() => {
+                        setCurrentConversationId(conv.id);
+                        setShowHistory(false);
+                      }}
+                      className={cn(
+                        "w-full text-left p-4 pr-10 rounded-2xl border transition-all",
+                        currentConversationId === conv.id
+                          ? "bg-[#CCFF00] border-[#CCFF00] text-black"
+                          : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                      )}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-bold truncate pr-2">{conv.title}</span>
+                        <span className="text-[8px] opacity-60 font-mono">
+                          {conv.updatedAt?.seconds ? format(new Date(conv.updatedAt.seconds * 1000), 'MMM d') : 'Recent'}
+                        </span>
+                      </div>
+                      <p className={cn(
+                        "text-[10px] truncate",
+                        currentConversationId === conv.id ? "text-black/70" : "text-zinc-600"
+                      )}>
+                        {conv.lastMessage}
+                      </p>
+                    </button>
+                    {/* Delete button — appears on hover */}
+                    <button
+                      onClick={(e) => deleteConversation(conv.id, e)}
+                      title="Delete conversation"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-red-500/10 hover:bg-red-500/30 text-red-400 hover:text-red-300"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  ))}
+                </>
               )}
             </div>
           </motion.div>
@@ -2711,7 +3070,21 @@ No padding, no filler — the Superior Agent will handle the final response to t
                 "prose-strong:font-bold",
                 m.role === 'bot' ? "prose-invert" : (chatTheme === 'light' ? "text-black prose-p:text-black prose-headings:text-black prose-strong:text-black prose-code:text-black prose-code:bg-black/10" : "text-white prose-invert")
               )}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 underline underline-offset-2 hover:text-blue-300 break-words"
+                      >
+                        {children}
+                      </a>
+                    )
+                  }}
+                >{m.text}</ReactMarkdown>
               </div>
             </motion.div>
           ))}
@@ -2720,23 +3093,53 @@ No padding, no filler — the Superior Agent will handle the final response to t
           <div className="flex flex-col space-y-2 p-4">
             <div className="flex items-center space-x-4">
               <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                animate={
+                  agentStatus === 'crud' ? { scale: [1, 1.15, 1] } :
+                  agentStatus === 'search' ? { rotate: 360 } :
+                  agentStatus === 'tools' ? { y: [0, -4, 0] } :
+                  { rotate: 360 }
+                }
+                transition={
+                  agentStatus === 'search' || agentStatus === 'thinking' || agentStatus === 'responding'
+                    ? { duration: 1.5, repeat: Infinity, ease: "linear" }
+                    : { duration: 0.8, repeat: Infinity, ease: "easeInOut" }
+                }
                 className={cn(
                   "p-2 rounded-xl",
                   chatTheme === 'light' ? "bg-zinc-100 border border-zinc-200 shadow-sm" : "bg-zinc-900 border border-zinc-800"
                 )}
               >
-                <Dumbbell className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-[#CCFF00]")} />
+                {agentStatus === 'crud' && <Dumbbell className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-[#CCFF00]")} />}
+                {agentStatus === 'search' && <Search className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-blue-400")} />}
+                {agentStatus === 'tools' && <Timer className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-orange-400")} />}
+                {(agentStatus === 'thinking' || agentStatus === 'responding') && <Brain className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-[#CCFF00]")} />}
               </motion.div>
               <div className="space-y-1">
                 <div className="flex space-x-1">
-                  <motion.div animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1 }} className="w-1.5 h-1.5 bg-[#CCFF00] rounded-full" />
-                  <motion.div animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1.5 h-1.5 bg-[#CCFF00] rounded-full" />
-                  <motion.div animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="w-1.5 h-1.5 bg-[#CCFF00] rounded-full" />
+                  {[0, 0.2, 0.4].map((delay, i) => (
+                    <motion.div
+                      key={i}
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ repeat: Infinity, duration: 1, delay }}
+                      className={cn("w-1.5 h-1.5 rounded-full",
+                        agentStatus === 'search' ? "bg-blue-400" :
+                        agentStatus === 'tools' ? "bg-orange-400" :
+                        "bg-[#CCFF00]"
+                      )}
+                    />
+                  ))}
                 </div>
-                <div className="text-[10px] font-mono opacity-50 uppercase tracking-widest">
-                  Processing... {responseTimer}s
+                <div className={cn(
+                  "text-[10px] font-mono uppercase tracking-widest",
+                  agentStatus === 'search' ? "text-blue-400 opacity-80" :
+                  agentStatus === 'tools' ? "text-orange-400 opacity-80" :
+                  "opacity-50"
+                )}>
+                  {agentStatus === 'thinking' && `Coach thinking... ${responseTimer}s`}
+                  {agentStatus === 'crud' && `Fetching your data... ${responseTimer}s`}
+                  {agentStatus === 'search' && `Searching the web... ${responseTimer}s`}
+                  {agentStatus === 'tools' && `Executing... ${responseTimer}s`}
+                  {agentStatus === 'responding' && `Preparing response... ${responseTimer}s`}
                 </div>
               </div>
             </div>
@@ -3124,9 +3527,46 @@ export default function App() {
   const aiDeleteRoutine = async (id: string) => {
     if (!user) return;
     try {
+      const routineDoc = await getDoc(doc(db, 'routines', id));
+      if (!routineDoc.exists()) {
+        return { success: false, error: 'Routine not found' };
+      }
+      if (routineDoc.data().userId !== user.uid) {
+        throw new Error("You can only delete your own routines");
+      }
       await deleteDoc(doc(db, 'routines', id));
       fetchRoutines(user.uid);
       return { success: true };
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  };
+
+  const aiListRoutines = async () => {
+    if (!user) return [];
+    try {
+      const q = query(collection(db, 'routines'), where('userId', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+      return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  };
+
+  const aiGetRoutine = async (id: string) => {
+    if (!user) return null;
+    try {
+      const routineDoc = await getDoc(doc(db, 'routines', id));
+      if (!routineDoc.exists()) {
+        return { error: 'Routine not found' };
+      }
+      const data = routineDoc.data();
+      if (data.userId !== user.uid) {
+        return { error: 'You can only access your own routines' };
+      }
+      return { id: routineDoc.id, ...data };
     } catch (e) {
       console.error(e);
       throw e;
@@ -3221,6 +3661,8 @@ export default function App() {
                       onCreateRoutine={aiCreateRoutine}
                       onUpdateRoutine={aiUpdateRoutine}
                       onDeleteRoutine={aiDeleteRoutine}
+                      onListRoutines={aiListRoutines}
+                      onGetRoutine={aiGetRoutine}
                       onUpdateProfile={updateProfile}
                     />
                   )}

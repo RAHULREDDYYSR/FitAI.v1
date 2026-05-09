@@ -10,10 +10,10 @@ export default defineConfig(({mode}) => {
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.OPENAI_API_KEY': JSON.stringify(env.OPENAI_API_KEY),
-      'process.env.LANGCHAIN_API_KEY': JSON.stringify(env.LANGSMITH_API_KEY),
-      'process.env.LANGCHAIN_TRACING_V2': JSON.stringify(env.LANGSMITH_TRACING),
-      'process.env.LANGCHAIN_PROJECT': JSON.stringify(env.LANGCHAIN_PROJECT),
-      'process.env.LANGCHAIN_ENDPOINT': JSON.stringify("https://api.smith.langchain.com"),
+      'process.env.LANGCHAIN_API_KEY': JSON.stringify(""), // Force empty to kill tracing
+      'process.env.LANGCHAIN_TRACING_V2': JSON.stringify("false"),
+      'process.env.LANGCHAIN_PROJECT': JSON.stringify(""),
+      'process.env.LANGCHAIN_ENDPOINT': JSON.stringify(""),
       'process.env.TAVILY_API_KEY': JSON.stringify(env.TAVILY_API_KEY),
     },
     resolve: {
