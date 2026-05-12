@@ -122,12 +122,12 @@ router.post("/chat", async (req: Request, res: Response) => {
         for (const call of lastMessage.tool_calls) {
           const toolToCall = tools.find(t => t.name === call.name);
           if (toolToCall) {
-            const output = await toolToCall.invoke(call);
-            results.push(output);
+            const output = await (toolToCall as any).invoke(call);
+            results.push(output as ToolMessage);
 
             // Parse the tool output and collect actions for the frontend
             try {
-              const parsed = JSON.parse(typeof output === 'string' ? output : output.content);
+              const parsed = JSON.parse(typeof output === 'string' ? output : String(output.content));
               toolActions.push(parsed);
             } catch {
               // Tool output wasn't JSON, ignore

@@ -24,7 +24,9 @@ import {
   Library,
   ArrowLeft,
   Info,
-  Loader2
+  Loader2,
+  Pencil,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import {
@@ -92,6 +94,240 @@ import {
 } from 'recharts';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+const aiRoutinePlanSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  exercises: z.array(z.object({
+    exerciseId: z.string(),
+    name: z.string(),
+    sets: z.array(z.object({
+      weight: z.number(),
+      reps: z.number(),
+      completed: z.boolean().optional()
+    }))
+  }))
+});
+
+type AIRoutinePlan = z.infer<typeof aiRoutinePlanSchema>;
+
+type PendingRoutinePlan = {
+  conversationId: string;
+  originalRequest: string;
+  routine: AIRoutinePlan;
+};
+
+type ActiveWorkoutExercise = WorkoutExercise & {
+  sessionKey?: string;
+};
+
+type ActiveWorkoutSession = {
+  userId: string;
+  routineId?: string;
+  name: string;
+  exercises: ActiveWorkoutExercise[];
+  startTime: number;
+  setStartTimes: Record<string, number>;
+  savedAt: number;
+  expiresAt: number;
+};
+
+const ACTIVE_WORKOUT_TTL_MS = 2 * 60 * 60 * 1000;
+
+const activeWorkoutStorageKey = (userId: string) => `fitai_active_workout_${userId}`;
+
+const safeNumber = (value: any, fallback = 0) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const getSetVolume = (set: Partial<WorkoutSet>) =>
+  safeNumber(set.weight) * safeNumber(set.reps);
+
+const getWorkoutVolume = (workout: Partial<WorkoutLog>) => {
+  const storedVolume = safeNumber(workout.totalVolume, Number.NaN);
+  if (Number.isFinite(storedVolume)) return storedVolume;
+  return (workout.exercises || []).reduce((total, exercise) =>
+    total + exercise.sets.reduce((setTotal, set) => setTotal + getSetVolume(set), 0), 0
+  );
+};
+
+const getWorkoutActiveTime = (workout: Partial<WorkoutLog>) =>
+  (workout.exercises || []).reduce((total, exercise) =>
+    total + exercise.sets.reduce((setTotal, set) => setTotal + safeNumber(set.timeTaken), 0), 0
+  );
+
+const getTimedOnlyActiveTime = (workout: Partial<WorkoutLog>) =>
+  (workout.exercises || []).reduce((total, exercise) =>
+    total + exercise.sets.reduce((setTotal, set) =>
+      setTotal + (safeNumber(set.reps) > 0 ? 0 : safeNumber(set.timeTaken)), 0
+    ), 0
+  );
+
+const getWorkoutIntensity = (workout: Partial<WorkoutLog>) => {
+  const storedIntensity = safeNumber(workout.intensity, Number.NaN);
+  if (Number.isFinite(storedIntensity) && storedIntensity > 0) return storedIntensity;
+
+  const duration = Math.max(safeNumber(workout.duration), 1);
+  const totalVolume = getWorkoutVolume(workout);
+  const timedOnlyActiveTime = getTimedOnlyActiveTime(workout);
+  const volumeIntensity = Math.round((totalVolume / duration) * 0.1 * 100);
+  const timedOnlyIntensity = Math.round((timedOnlyActiveTime / duration) * 100);
+  return volumeIntensity + timedOnlyIntensity;
+};
+
+const formatDuration = (seconds?: number) => {
+  const totalSeconds = safeNumber(seconds);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+const formatSetPerformance = (set: Partial<WorkoutSet>) => {
+  const weight = safeNumber(set.weight);
+  const reps = safeNumber(set.reps);
+  const timeTaken = safeNumber(set.timeTaken);
+  const parts: string[] = [];
+
+  if (weight > 0 || reps > 0) {
+    parts.push(`${weight > 0 ? `${weight} kg` : 'Bodyweight'} x ${reps} reps`);
+  }
+
+  if (reps <= 0 && timeTaken > 0) {
+    parts.push(formatDuration(timeTaken));
+  }
+
+  return parts.length > 0 ? parts.join(' | ') : 'Timed/bodyweight set';
+};
+
+const createActiveWorkoutSession = (userId: string, routine?: Routine | null): ActiveWorkoutSession => {
+  const startTime = Date.now();
+  return {
+    userId,
+    routineId: routine?.id,
+    name: routine?.name || 'Morning Session',
+    exercises: routine?.exercises.map(exercise => ({
+      ...exercise,
+      sessionKey: Math.random().toString(36).slice(2, 11),
+      sets: exercise.sets.map(set => ({
+        ...set,
+        weight: safeNumber(set.weight),
+        reps: safeNumber(set.reps),
+        timeTaken: safeNumber(set.timeTaken),
+        completed: false
+      }))
+    })) || [],
+    startTime,
+    setStartTimes: {},
+    savedAt: startTime,
+    expiresAt: startTime + ACTIVE_WORKOUT_TTL_MS
+  };
+};
+
+const saveActiveWorkoutSession = (session: ActiveWorkoutSession) => {
+  localStorage.setItem(activeWorkoutStorageKey(session.userId), JSON.stringify({
+    ...session,
+    savedAt: Date.now(),
+    expiresAt: Date.now() + ACTIVE_WORKOUT_TTL_MS
+  }));
+};
+
+const loadActiveWorkoutSession = (userId: string): ActiveWorkoutSession | null => {
+  try {
+    const raw = localStorage.getItem(activeWorkoutStorageKey(userId));
+    if (!raw) return null;
+    const session = JSON.parse(raw) as ActiveWorkoutSession;
+    if (session.userId !== userId || safeNumber(session.expiresAt) < Date.now()) {
+      localStorage.removeItem(activeWorkoutStorageKey(userId));
+      return null;
+    }
+    return {
+      ...session,
+      exercises: (session.exercises || []).map(exercise => ({
+        ...exercise,
+        sessionKey: exercise.sessionKey || Math.random().toString(36).slice(2, 11),
+        sets: (exercise.sets || []).map(set => ({
+          ...set,
+          weight: safeNumber(set.weight),
+          reps: safeNumber(set.reps),
+          timeTaken: safeNumber(set.timeTaken),
+          completed: Boolean(set.completed)
+        }))
+      })),
+      setStartTimes: session.setStartTimes || {}
+    };
+  } catch {
+    localStorage.removeItem(activeWorkoutStorageKey(userId));
+    return null;
+  }
+};
+
+const clearActiveWorkoutSession = (userId: string) => {
+  localStorage.removeItem(activeWorkoutStorageKey(userId));
+};
+
+const normalizeRoutinePlan = (rawRoutine: any): AIRoutinePlan => {
+  const rawExercises = Array.isArray(rawRoutine?.exercises) ? rawRoutine.exercises : [];
+  return {
+    name: String(rawRoutine?.name || 'AI Planned Workout').slice(0, 100),
+    description: rawRoutine?.description ? String(rawRoutine.description) : '',
+    exercises: rawExercises.map((rawExercise: any) => {
+      const catalogMatch = EXERCISES.find((exercise) =>
+        exercise.id === rawExercise?.exerciseId ||
+        exercise.name.toLowerCase() === String(rawExercise?.name || '').toLowerCase()
+      );
+      const rawSets = Array.isArray(rawExercise?.sets) ? rawExercise.sets : [];
+      return {
+        exerciseId: catalogMatch?.id || String(rawExercise?.exerciseId || rawExercise?.name || 'custom-exercise'),
+        name: catalogMatch?.name || String(rawExercise?.name || rawExercise?.exerciseId || 'Custom Exercise'),
+        sets: rawSets.map((rawSet: any) => ({
+          weight: safeNumber(rawSet?.weight),
+          reps: safeNumber(rawSet?.reps),
+          completed: false
+        }))
+      };
+    }).filter((exercise: WorkoutExercise) => exercise.name && exercise.sets.length > 0)
+  };
+};
+
+const formatRoutineForApproval = (routine: AIRoutinePlan) => {
+  const rows = routine.exercises.map((exercise) => {
+    const reps = exercise.sets.map((set) => set.reps).join(', ');
+    const weights = exercise.sets.map((set) => set.weight > 0 ? `${set.weight}kg` : 'Bodyweight').join(', ');
+    return `| ${exercise.name.replace(/\|/g, '\\|')} | ${exercise.sets.length} | ${reps} | ${weights} |`;
+  }).join('\n');
+
+  return `I drafted this workout, but I have not saved it yet.
+
+**${routine.name}**
+${routine.description ? `\n${routine.description}\n` : ''}
+| Exercise | Sets | Reps | Weight |
+|---|---:|---|---|
+${rows}
+
+Reply **approve** to save this workout, or tell me what to change.`;
+};
+
+const isWorkoutCreationRequest = (text: string) => {
+  const normalized = text.toLowerCase();
+  const hasCreateVerb = /\b(create|make|build|plan|design|generate|add)\b/.test(normalized);
+  const hasWorkoutTarget = /\b(workout|routine|plan|split|session|program|day)\b/.test(normalized);
+  const isReadOnly = /\b(list|show|view|get|find|what|which|history|delete|remove|update|edit)\b/.test(normalized);
+  return hasCreateVerb && hasWorkoutTarget && !isReadOnly;
+};
+
+const isRoutinePlanApproval = (text: string) => {
+  const normalized = text.toLowerCase();
+  const approval = /\b(approve|approved|yes|yeah|yep|confirm|save|create|add it|send it|go ahead|looks good|perfect)\b/.test(normalized);
+  const revision = /\b(but|change|swap|replace|remove|include|exclude|instead|adjust|modify|edit|update|more|less|harder|easier)\b/.test(normalized);
+  return approval && !revision;
+};
+
+const isRoutinePlanCancellation = (text: string) =>
+  /\b(cancel|discard|never mind|nevermind|do not save|don't save|stop)\b/i.test(text);
+
+const isRoutinePlanRevision = (text: string) =>
+  /\b(change|swap|replace|remove|add|include|exclude|instead|adjust|modify|edit|update|more|less|harder|easier|heavier|lighter|sets?|reps?|exercise|make|use|focus|target|avoid|without)\b/i.test(text);
 
 // --- Context & State ---
 const AuthContext = createContext<{
@@ -279,7 +515,8 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
   useEffect(() => {
     onEditModeChange?.(isEditing);
   }, [isEditing]);
-  const [isRefining, setIsRefining] = useState(false);
+  const [isRefiningShort, setIsRefiningShort] = useState(false);
+  const [isRefiningLong, setIsRefiningLong] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [isCreatingSheet, setIsCreatingSheet] = useState(false);
@@ -324,115 +561,145 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
           </button>
           <button
             onClick={() => setIsEditing(!isEditing)}
-            className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl"
+            className={cn(
+              "p-2 rounded-xl border transition-all flex items-center space-x-1.5",
+              isEditing
+                ? "bg-[#CCFF00] text-black border-[#CCFF00] font-bold shadow-lg shadow-[#CCFF00]/20"
+                : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700"
+            )}
+            title={isEditing ? "Save Profile" : "Edit Profile"}
           >
-            <UserIcon className="w-5 h-5" />
+            {isEditing ? (
+              <>
+                <Check className="w-4 h-4 stroke-[2.5]" />
+                <span className="text-xs font-mono uppercase tracking-wider pr-1">Save</span>
+              </>
+            ) : (
+              <>
+                <Pencil className="w-4 h-4" />
+                <span className="text-xs font-mono uppercase tracking-wider pr-1">Edit</span>
+              </>
+            )}
           </button>
         </div>
       </header>
 
       {/* Goal & Measurements */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-[#1A1A1A] p-6 rounded-3xl border border-zinc-800 space-y-4">
+        <div className="bg-[#1A1A1A] p-6 rounded-3xl border border-zinc-800 space-y-5">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">My Vision & Goal</h3>
-            <button
-              disabled={isRefining}
-              onClick={async () => {
-                if (!profile?.aim) {
-                  alert("Please describe your goal or aim first in the text area below.");
-                  return;
-                }
-                setIsRefining(true);
-                try {
-                  const model = new ChatOpenAI({
-                    modelName: "gpt-5.4-mini",
-                    openAIApiKey: process.env.OPENAI_API_KEY,
-                    configuration: { dangerouslyAllowBrowser: true },
-                    callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" 
-                      ? [new LangChainTracer({ projectName: process.env.LANGCHAIN_PROJECT || "FitAI" })]
-                      : undefined
-                  });
-
-                  const prompt = `Act as an expert fitness strategist. Refine the following user's fitness vision and aim into a professional, high-impact, and motivating primary goal.
-                  
-                  User's vision and aim: "${profile.aim}"
-                  Current Goal: "${profile.goal || 'None'}"
-                  
-                  Rules:
-                  - Keep it under 10 words
-                  - Use powerful, athletic language
-                  - Direct alignment with their motivation
-                  
-                  Refined Primary Goal:`;
-
-                  const response = await model.invoke(prompt, {
-                    callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" ? [
-                      new LangChainTracer({
-                        projectName: process.env.LANGCHAIN_PROJECT || "FitAI",
-                      })
-                    ] : []
-                  });
-                  const refined = response.content.toString() || "";
-                  onUpdate({ goal: refined.trim().replace(/^"|"$/g, '') });
-                } catch (e: any) {
-                  console.error("AI Refinement Error:", e);
-                  alert(`AI Refinement failed: ${e.message || "Unknown error"}. Please try again.`);
-                } finally {
-                  setIsRefining(false);
-                }
-              }}
-              className={cn(
-                "p-2 bg-zinc-900 border border-zinc-800 rounded-xl transition-all",
-                isRefining ? "animate-pulse text-[#CCFF00]" : "hover:text-[#CCFF00]"
-              )}
-              title="Refine with AI"
-            >
-              {isRefining ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <p className="text-[10px] text-zinc-600 uppercase font-mono mb-1">Primary Goal</p>
-              {isEditing ? (
-                <input
-                  className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white"
-                  value={profile?.goal || ''}
-                  placeholder="e.g. Hypertrophy & Strength"
-                  onChange={(e) => onUpdate({ goal: e.target.value })}
-                />
-              ) : (
-                <p className="text-xl font-bold">{profile?.goal || 'No goal set yet.'}</p>
-              )}
-            </div>
-            <div>
-              <p className="text-[10px] text-zinc-600 uppercase font-mono mb-1">Detailed Aim</p>
-              {isEditing ? (
-                <textarea
-                  className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white text-xs resize-none h-24"
-                  value={profile?.aim || ''}
-                  placeholder="Describe what you want to achieve, your motivation, and your ultimate vision..."
-                  onChange={(e) => onUpdate({ aim: e.target.value })}
-                />
-              ) : (
-                <p className="text-sm text-zinc-400 italic">"{profile?.aim || 'Describe your vision here...'}"</p>
-              )}
-            </div>
-            <div className="flex items-center space-x-1.5 pt-2">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">My Vision &amp; Goals</h3>
+            <div className="flex items-center space-x-1.5">
               <div className="w-1.5 h-1.5 rounded-full bg-[#CCFF00] animate-pulse" />
-              <p className="text-[9px] text-zinc-500 uppercase font-mono tracking-wider">Coach AI prioritizing this goal</p>
+              <p className="text-[9px] text-zinc-500 uppercase font-mono tracking-wider">AI Coaching Active</p>
             </div>
+          </div>
+
+          {/* Short-term Goal */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">
+                Short-term <span className="normal-case text-zinc-700 font-normal">(next few months)</span>
+              </p>
+              <button
+                disabled={isRefiningShort}
+                onClick={async () => {
+                  const aim = profile?.aim || profile?.shortTermGoal || '';
+                  if (!aim) { alert("Add your aim or short-term goal first."); return; }
+                  setIsRefiningShort(true);
+                  try {
+                    const m = new ChatOpenAI({ modelName: "gpt-4o-mini", openAIApiKey: process.env.OPENAI_API_KEY, configuration: { dangerouslyAllowBrowser: true } });
+                    const res = await m.invoke(`You are an elite fitness coach. Distill the user's aim into a sharp SHORT-TERM goal (next 2-4 months). Under 12 words, action-oriented, specific.\nUser aim: "${aim}"\nCurrent short goal: "${profile?.shortTermGoal || 'None'}"\nRefined Short-term Goal (only the goal text, no quotes):`);
+                    onUpdate({ shortTermGoal: res.content.toString().trim().replace(/^"|"$/g, '') });
+                  } catch (e) { alert(`AI Refine failed: ${e.message}`); }
+                  finally { setIsRefiningShort(false); }
+                }}
+                className={cn("p-1.5 rounded-lg border transition-all flex items-center space-x-1",
+                  isRefiningShort ? "border-[#CCFF00]/50 text-[#CCFF00] animate-pulse" : "border-zinc-800 text-zinc-500 hover:text-[#CCFF00] hover:border-[#CCFF00]/40"
+                )}
+                title="Refine short-term goal with AI"
+              >
+                {isRefiningShort ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                <span className="text-[9px] font-mono uppercase tracking-wider">Refine</span>
+              </button>
+            </div>
+            {isEditing ? (
+              <input
+                className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#CCFF00]/50 outline-none transition-colors text-sm"
+                value={profile?.shortTermGoal || ''}
+                placeholder="e.g. Gain 5kg lean muscle by August"
+                onChange={(e) => onUpdate({ shortTermGoal: e.target.value })}
+              />
+            ) : (
+              <p className="text-lg font-bold">{profile?.shortTermGoal || <span className="text-zinc-600 font-normal italic text-sm">No short-term goal set yet</span>}</p>
+            )}
+          </div>
+
+          {/* Long-term Goal */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">
+                Long-term <span className="normal-case text-zinc-700 font-normal">(1 year+)</span>
+              </p>
+              <button
+                disabled={isRefiningLong}
+                onClick={async () => {
+                  const aim = profile?.aim || profile?.longTermGoal || '';
+                  if (!aim) { alert("Add your aim or long-term goal first."); return; }
+                  setIsRefiningLong(true);
+                  try {
+                    const m = new ChatOpenAI({ modelName: "gpt-4o-mini", openAIApiKey: process.env.OPENAI_API_KEY, configuration: { dangerouslyAllowBrowser: true } });
+                    const res = await m.invoke(`You are an elite fitness coach. Craft an ambitious LONG-TERM goal (1+ years). Under 15 words, visionary, specific milestone.\nUser aim: "${aim}"\nShort-term: "${profile?.shortTermGoal || 'None'}"\nCurrent long goal: "${profile?.longTermGoal || 'None'}"\nRefined Long-term Goal (only the goal text, no quotes):`);
+                    onUpdate({ longTermGoal: res.content.toString().trim().replace(/^"|"$/g, '') });
+                  } catch (e) { alert(`AI Refine failed: ${e.message}`); }
+                  finally { setIsRefiningLong(false); }
+                }}
+                className={cn("p-1.5 rounded-lg border transition-all flex items-center space-x-1",
+                  isRefiningLong ? "border-[#CCFF00]/50 text-[#CCFF00] animate-pulse" : "border-zinc-800 text-zinc-500 hover:text-[#CCFF00] hover:border-[#CCFF00]/40"
+                )}
+                title="Refine long-term goal with AI"
+              >
+                {isRefiningLong ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                <span className="text-[9px] font-mono uppercase tracking-wider">Refine</span>
+              </button>
+            </div>
+            {isEditing ? (
+              <input
+                className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#CCFF00]/50 outline-none transition-colors text-sm"
+                value={profile?.longTermGoal || ''}
+                placeholder="e.g. Compete in Men's Physique by 2026"
+                onChange={(e) => onUpdate({ longTermGoal: e.target.value })}
+              />
+            ) : (
+              <p className="text-base font-semibold text-zinc-200">{profile?.longTermGoal || <span className="text-zinc-600 font-normal italic text-sm">No long-term goal set yet</span>}</p>
+            )}
+          </div>
+
+          {/* Detailed Aim */}
+          <div className="space-y-1.5">
+            <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">Detailed Aim &amp; Vision</p>
+            {isEditing ? (
+              <textarea
+                className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white text-xs resize-none h-20 focus:border-[#CCFF00]/50 outline-none transition-colors"
+                value={profile?.aim || ''}
+                placeholder="Describe what you want to achieve, your motivation, and your ultimate vision..."
+                onChange={(e) => onUpdate({ aim: e.target.value })}
+              />
+            ) : (
+              <p className="text-sm text-zinc-400 italic">"{profile?.aim || 'Describe your vision here...'}"</p>
+            )}
           </div>
         </div>
 
         <div className="bg-[#101010] p-6 rounded-3xl border border-zinc-800 space-y-6">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">Vital Stats & Measurements</h3>
+          <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">Vital Stats &amp; Measurements</h3>
           <div className="grid grid-cols-2 gap-x-4 gap-y-6">
             {[
               { label: 'Age', key: 'age', unit: 'yrs', type: 'number' },
               { label: 'Sex', key: 'sex', unit: '', type: 'select', options: ['male', 'female', 'other'] },
               { label: 'Weight', key: 'weight', unit: 'kg', type: 'number' },
               { label: 'Height', key: 'height', unit: 'cm', type: 'number' },
+
             ].map((m) => (
               <div key={m.key} className="space-y-1">
                 <p className="text-[10px] text-zinc-600 uppercase font-mono">{m.label}</p>
@@ -585,7 +852,9 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
 
 const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const intensity = workout.intensity || Math.round(workout.totalVolume / (workout.duration / 60 || 1));
+  const totalVolume = getWorkoutVolume(workout);
+  const intensity = getWorkoutIntensity(workout);
+  const efficiency = Math.round((totalVolume / (workout.exercises.length || 1)) / 10);
 
   return (
     <div
@@ -609,7 +878,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
                 e.stopPropagation();
                 const workoutDate = format(new Date(workout.date.seconds * 1000), 'EEEE, MMMM d');
                 const exercisesList = workout.exercises.map(ex => `- ${ex.name}: ${ex.sets.length} sets`).join('\n');
-                const text = `I just crushed a workout on FitAI!\n\nWorkout: ${workout.name}\nDate: ${workoutDate}\nTotal Volume: ${workout.totalVolume.toLocaleString()} kg\nExercises:\n${exercisesList}\nDuration: ${Math.floor(workout.duration / 60)} mins\n\n#FitAI #Fitness #Workout`;
+                const text = `I just crushed a workout on FitAI!\n\nWorkout: ${workout.name}\nDate: ${workoutDate}\nTotal Volume: ${totalVolume.toLocaleString()} kg\nExercises:\n${exercisesList}\nDuration: ${Math.floor(workout.duration / 60)} mins\n\n#FitAI #Fitness #Workout`;
 
                 if (navigator.share) {
                   navigator.share({
@@ -628,7 +897,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
               <Share2 className="w-4 h-4" />
             </button>
             <div className="text-right">
-              <div className="text-[#CCFF00] font-bold">{workout.totalVolume} kg</div>
+              <div className="text-[#CCFF00] font-bold">{totalVolume} kg</div>
               <div className="text-[10px] text-zinc-500 font-mono">{Math.floor(workout.duration / 60)} mins</div>
             </div>
             {isExpanded ? (
@@ -647,7 +916,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
           <div className="h-4 w-px bg-zinc-800" />
           <div className="flex flex-col">
             <span className="text-[9px] text-zinc-500 uppercase font-mono">Efficiency</span>
-            <span className="text-xs font-bold text-white">{Math.round((workout.totalVolume / (workout.exercises.length || 1)) / 10)} pts</span>
+            <span className="text-xs font-bold text-white">{efficiency} pts</span>
           </div>
         </div>
 
@@ -676,7 +945,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
                         <div key={sIdx} className="bg-zinc-900/50 border border-zinc-800 p-2 rounded-lg flex flex-col justify-center">
                           <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-tighter">Set {sIdx + 1}</span>
                           <span className="text-xs font-bold text-zinc-400">
-                            {set.weight} <span className="text-[10px] font-normal opacity-50">kg</span> × {set.reps} <span className="text-[10px] font-normal opacity-50">reps</span>
+                            {formatSetPerformance(set)}
                           </span>
                         </div>
                       ))}
@@ -765,13 +1034,13 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
 
   const data = filteredWorkouts.slice().reverse().map(w => ({
     date: format(new Date(w.date.seconds * 1000), 'MMM d'),
-    volume: w.totalVolume,
+    volume: getWorkoutVolume(w),
     duration: Math.floor(w.duration / 60)
   }));
 
   const muscleVolume = filteredWorkouts.reduce((acc, w) => {
     w.exercises.forEach(ex => {
-      const vol = ex.sets.reduce((sAcc, s) => sAcc + (s.weight * s.reps), 0);
+      const vol = ex.sets.reduce((sAcc, s) => sAcc + getSetVolume(s), 0);
       acc[ex.name] = (acc[ex.name] || 0) + vol;
     });
     return acc;
@@ -790,7 +1059,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
     filteredWorkouts.forEach(w => {
       w.exercises.forEach(ex => {
         let exerciseDef = EXERCISES.find(e => e.id === ex.exerciseId);
-        
+
         // Fallback: fuzzy name match
         if (!exerciseDef) {
           const cleanName = ex.name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -802,8 +1071,12 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
         const completedSets = ex.sets.filter(s => s.completed);
         if (completedSets.length === 0) return;
 
-        const totalReps = completedSets.reduce((acc, s) => acc + s.reps, 0);
-        const avgWeight = completedSets.reduce((acc, s) => acc + s.weight, 0) / completedSets.length;
+        const totalReps = completedSets.reduce((acc, s) => acc + safeNumber(s.reps), 0);
+        const avgWeight = completedSets.reduce((acc, s) => acc + safeNumber(s.weight), 0) / completedSets.length;
+        const timedOnlySeconds = completedSets.reduce((acc, s) =>
+          acc + (safeNumber(s.reps) > 0 ? 0 : safeNumber(s.timeTaken)), 0
+        );
+        const effortUnits = totalReps > 0 ? completedSets.length * totalReps : Math.max(timedOnlySeconds / 10, completedSets.length);
 
         // ─── EFFORT SCORE FORMULA ───────────────────────────────────────────
         // Uses logarithmic scaling so heavy AND light exercises both score fairly.
@@ -811,8 +1084,8 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
         // log(1 + avgWeight + 1) adds a small weight bonus so heavier isn't penalised,
         //   but it's logarithmic so the bonus tapers off quickly.
         // Result: 4×15 abs ≈ 13 pts, 4×8 squats @ 160kg ≈ 17 pts — both meaningful.
-        const effortScore = Math.log1p(completedSets.length * totalReps) 
-                          * Math.log1p(avgWeight + 1);
+        const effortScore = Math.log1p(effortUnits)
+          * Math.log1p(avgWeight + 1);
 
         const groups = (exerciseDef?.muscle_groups && exerciseDef.muscle_groups.length > 0)
           ? exerciseDef.muscle_groups
@@ -1034,16 +1307,15 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
               </thead>
               <tbody className="divide-y divide-zinc-800/50">
                 {workouts.slice(0, 10).map((w, i) => {
-                  const totalActiveTime = w.exercises.reduce((acc, ex) =>
-                    acc + ex.sets.reduce((sAcc, s) => sAcc + (s.timeTaken || 0), 0), 0
-                  );
+                  const totalActiveTime = getTimedOnlyActiveTime(w);
+                  const totalVolume = getWorkoutVolume(w);
                   return (
                     <tr key={i} className="hover:bg-white/5 transition-colors">
                       <td className="p-3 font-bold">{format(new Date(w.date.seconds * 1000), 'MMM d')}</td>
-                      <td className="p-3 text-[#CCFF00] font-bold">{w.totalVolume}kg</td>
+                      <td className="p-3 text-[#CCFF00] font-bold">{totalVolume}kg</td>
                       {showTimeMatrix && <td className="p-3 text-zinc-400">{Math.floor(w.duration / 60)}m</td>}
                       {showTimeMatrix && <td className="p-3 text-zinc-500">{Math.floor(totalActiveTime / 60)}m</td>}
-                      {showTimeMatrix && <td className="p-3 text-[#CCFF00] font-bold">{w.intensity || '-'}</td>}
+                      {showTimeMatrix && <td className="p-3 text-[#CCFF00] font-bold">{getWorkoutIntensity(w) || '-'}</td>}
                     </tr>
                   );
                 })}
@@ -1077,7 +1349,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
       <div className="grid grid-cols-2 gap-4">
         {[
           { label: 'Total Logs', value: filteredWorkouts.length, icon: History },
-          { label: 'Avg Volume', value: Math.round(filteredWorkouts.reduce((acc, curr) => acc + curr.totalVolume, 0) / (filteredWorkouts.length || 1)), icon: Dumbbell },
+          { label: 'Avg Volume', value: Math.round(filteredWorkouts.reduce((acc, curr) => acc + getWorkoutVolume(curr), 0) / (filteredWorkouts.length || 1)), icon: Dumbbell },
         ].map((stat, i) => (
           <div key={i} className="bg-[#1A1A1A] p-4 rounded-2xl border border-zinc-800">
             <stat.icon className="w-4 h-4 text-zinc-500 mb-2" />
@@ -1541,13 +1813,13 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                     <input
                       type="number"
                       value={set.weight || ''}
-                      onChange={e => updateSet(exIdx, sIdx, 'weight', parseFloat(e.target.value))}
+                      onChange={e => updateSet(exIdx, sIdx, 'weight', safeNumber(parseFloat(e.target.value)))}
                       className="bg-transparent border-none text-center focus:ring-0 font-bold"
                     />
                     <input
                       type="number"
                       value={set.reps || ''}
-                      onChange={e => updateSet(exIdx, sIdx, 'reps', parseInt(e.target.value))}
+                      onChange={e => updateSet(exIdx, sIdx, 'reps', safeNumber(parseInt(e.target.value)))}
                       className="bg-transparent border-none text-center focus:ring-0 font-bold"
                     />
                     <button
@@ -1585,33 +1857,33 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   );
 };
 
-const ExerciseItem = ({ 
-  ex, 
-  exIdx, 
-  exercises, 
-  setExercises, 
-  getPrevPerformance, 
-  updateSet, 
-  toggleSetComplete, 
-  startSetTimer, 
-  formatTimeTaken, 
-  parseTimeTaken, 
-  setStartTimes, 
-  addSet 
+const ExerciseItem = ({
+  ex,
+  exIdx,
+  exercises,
+  setExercises,
+  getPrevPerformance,
+  updateSet,
+  toggleSetComplete,
+  startSetTimer,
+  formatTimeTaken,
+  parseTimeTaken,
+  setStartTimes,
+  addSet
 }: any) => {
   const dragControls = useDragControls();
 
   return (
-    <Reorder.Item 
-      key={ex.sessionKey} 
-      value={ex} 
+    <Reorder.Item
+      key={ex.sessionKey}
+      value={ex}
       dragListener={false}
       dragControls={dragControls}
       className="space-y-4 bg-[#0A0A0A] select-none"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <div 
+          <div
             onPointerDown={(e) => dragControls.start(e)}
             className="cursor-grab active:cursor-grabbing p-2 opacity-50 hover:opacity-100 touch-none"
           >
@@ -1661,14 +1933,14 @@ const ExerciseItem = ({
                 type="number"
                 value={set.weight || ''}
                 placeholder="0"
-                onChange={(e) => updateSet(exIdx, sIdx, 'weight', parseFloat(e.target.value))}
+                onChange={(e) => updateSet(exIdx, sIdx, 'weight', safeNumber(parseFloat(e.target.value)))}
                 className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
               />
               <input
                 type="number"
                 value={set.reps || ''}
                 placeholder="0"
-                onChange={(e) => updateSet(exIdx, sIdx, 'reps', parseInt(e.target.value))}
+                onChange={(e) => updateSet(exIdx, sIdx, 'reps', safeNumber(parseInt(e.target.value)))}
                 className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
               />
               <div className="relative group">
@@ -1731,29 +2003,40 @@ const ExerciseItem = ({
   );
 };
 
-const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: Routine, workouts: WorkoutLog[], onComplete: () => void, onCancel: () => void }) => {
-  const { profile, sheets } = useAuth();
-  const [exercises, setExercises] = useState<WorkoutExercise[]>(routine?.exercises.map(e => ({
-    ...e,
-    sessionKey: Math.random().toString(36).substr(2, 9),
-    sets: e.sets.map(s => ({ ...s, completed: false }))
-  })) || []);
-  const [name, setName] = useState(routine?.name || 'Morning Session');
-  const [startTime] = useState(Date.now());
+const WorkoutLogger = ({
+  routine,
+  workouts,
+  initialSession,
+  onComplete,
+  onCancel
+}: {
+  routine?: Routine,
+  workouts: WorkoutLog[],
+  initialSession?: ActiveWorkoutSession | null,
+  onComplete: () => void,
+  onCancel: () => void
+}) => {
+  const { user, profile, sheets } = useAuth();
+  const currentUserId = user?.uid || auth.currentUser?.uid || 'anonymous';
+  const [exercises, setExercises] = useState<ActiveWorkoutExercise[]>(
+    () => initialSession?.exercises || createActiveWorkoutSession(currentUserId, routine).exercises
+  );
+  const [name, setName] = useState(initialSession?.name || routine?.name || 'Morning Session');
+  const [startTime] = useState(initialSession?.startTime || Date.now());
   const [elapsed, setElapsed] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [finalVolume, setFinalVolume] = useState(0);
   const [finalIntensity, setFinalIntensity] = useState(0);
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
-  const [setStartTimes, setSetStartTimes] = useState<Record<string, number>>({});
+  const [setStartTimes, setSetStartTimes] = useState<Record<string, number>>(initialSession?.setStartTimes || {});
 
   const getPrevPerformance = (exerciseName: string, setIdx: number) => {
     // Search backwards through history
     for (const workout of workouts) {
       const ex = workout.exercises.find(e => e.name === exerciseName);
       if (ex && ex.sets[setIdx]) {
-        return `${ex.sets[setIdx].weight}/${ex.sets[setIdx].reps}`;
+        return formatSetPerformance(ex.sets[setIdx]);
       }
     }
     return '-';
@@ -1765,6 +2048,20 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
     }, 1000);
     return () => clearInterval(timer);
   }, [startTime]);
+
+  useEffect(() => {
+    if (!currentUserId || currentUserId === 'anonymous' || isComplete) return;
+    saveActiveWorkoutSession({
+      userId: currentUserId,
+      routineId: initialSession?.routineId || routine?.id,
+      name,
+      exercises,
+      startTime,
+      setStartTimes,
+      savedAt: Date.now(),
+      expiresAt: Date.now() + ACTIVE_WORKOUT_TTL_MS
+    });
+  }, [currentUserId, exercises, initialSession?.routineId, isComplete, name, routine?.id, setStartTimes, startTime]);
 
   const formatTime = (seconds: number) => {
     const min = Math.floor(seconds / 60);
@@ -1790,7 +2087,8 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
 
   const updateSet = (exIdx: number, setIdx: number, field: string, value: any) => {
     const newEx = [...exercises];
-    newEx[exIdx].sets[setIdx] = { ...newEx[exIdx].sets[setIdx], [field]: value };
+    const normalizedValue = ['weight', 'reps', 'timeTaken'].includes(field) ? safeNumber(value) : value;
+    newEx[exIdx].sets[setIdx] = { ...newEx[exIdx].sets[setIdx], [field]: normalizedValue };
     setExercises(newEx);
   };
 
@@ -1804,7 +2102,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
       const startTimeRef = setStartTimes[setKey];
       if (startTimeRef) {
         const timeTaken = Math.floor((Date.now() - startTimeRef) / 1000);
-        set.timeTaken = (set.timeTaken || 0) + timeTaken;
+        set.timeTaken = safeNumber(set.timeTaken) + timeTaken;
       }
       set.completed = true;
       // Clear start time
@@ -1828,9 +2126,10 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
   };
 
   const formatTimeTaken = (seconds: number | undefined): string => {
-    if (!seconds) return '';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+    const totalSeconds = safeNumber(seconds);
+    if (!totalSeconds) return '';
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -1850,17 +2149,28 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
     if (exercises.length === 0 || isSaving) return;
     setIsSaving(true);
     const duration = Math.floor((Date.now() - startTime) / 1000);
-    const totalVolume = exercises.reduce((acc, ex) =>
-      acc + ex.sets.reduce((sAcc, s) => sAcc + (s.weight * s.reps), 0), 0
+    const sanitizedExercises = exercises.map(({ sessionKey, ...exercise }) => ({
+      ...exercise,
+      sets: exercise.sets.map(set => ({
+        ...set,
+        weight: safeNumber(set.weight),
+        reps: safeNumber(set.reps),
+        timeTaken: safeNumber(set.timeTaken),
+        completed: Boolean(set.completed)
+      }))
+    }));
+    const totalVolume = sanitizedExercises.reduce((acc, ex) =>
+      acc + ex.sets.reduce((sAcc, s) => sAcc + getSetVolume(s), 0), 0
     );
 
-    // Calculate intensity
-    const totalActiveTime = exercises.reduce((acc, ex) =>
-      acc + ex.sets.reduce((sAcc, s) => sAcc + (s.timeTaken || 0), 0), 0
+    const timedOnlyActiveTime = sanitizedExercises.reduce((acc, ex) =>
+      acc + ex.sets.reduce((sAcc, s) =>
+        sAcc + (safeNumber(s.reps) > 0 ? 0 : safeNumber(s.timeTaken)), 0
+      ), 0
     );
-    // Intensity = (Volume / Duration) * (Active Ratio) * Factor
-    const activeRatio = totalActiveTime / duration;
-    const intensity = Math.round((totalVolume / (duration || 1)) * (activeRatio || 0.1) * 100);
+    const volumeIntensity = Math.round((totalVolume / (duration || 1)) * 0.1 * 100);
+    const timedOnlyIntensity = Math.round((timedOnlyActiveTime / (duration || 1)) * 100);
+    const intensity = volumeIntensity + timedOnlyIntensity;
 
     try {
       const workoutData = {
@@ -1870,7 +2180,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
         duration,
         totalVolume,
         intensity,
-        exercises,
+        exercises: sanitizedExercises,
         createdAt: serverTimestamp()
       };
 
@@ -1883,6 +2193,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
 
       setFinalVolume(totalVolume);
       setFinalIntensity(intensity);
+      clearActiveWorkoutSession(currentUserId);
       setIsComplete(true);
     } catch (e) {
       console.error(e);
@@ -1899,12 +2210,12 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
           workout.name,
           ex.name,
           i + 1,
-          set.weight,
-          set.reps,
-          set.timeTaken || 0,
+          safeNumber(set.weight),
+          safeNumber(set.reps),
+          safeNumber(set.timeTaken),
           workout.duration,
-          workout.totalVolume,
-          workout.intensity || 0
+          getWorkoutVolume(workout),
+          getWorkoutIntensity(workout)
         ])
       );
 
@@ -1931,6 +2242,11 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
     } catch (e) {
       console.error('Failed to log to Google Sheets:', e);
     }
+  };
+
+  const discardWorkout = () => {
+    clearActiveWorkoutSession(currentUserId);
+    onCancel();
   };
 
   if (showExerciseSelector) {
@@ -2011,7 +2327,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
             <span>{formatTime(elapsed)}</span>
           </div>
           <div className="flex space-x-2 shrink-0">
-            <button onClick={onCancel} disabled={isSaving} className="text-zinc-600 font-bold px-4">Discard</button>
+            <button onClick={discardWorkout} disabled={isSaving} className="text-zinc-600 font-bold px-4">Discard</button>
             <button
               onClick={saveWorkout}
               disabled={isSaving}
@@ -2025,7 +2341,7 @@ const WorkoutLogger = ({ routine, workouts, onComplete, onCancel }: { routine?: 
 
       <Reorder.Group axis="y" values={exercises} onReorder={setExercises} className="flex-1 space-y-8 px-6 pt-6">
         {exercises.map((ex, exIdx) => (
-          <ExerciseItem 
+          <ExerciseItem
             key={ex.sessionKey}
             ex={ex}
             exIdx={exIdx}
@@ -2091,6 +2407,7 @@ const AIAssistant = ({
   const [chatTheme, setChatTheme] = useState<'dark' | 'light'>('dark');
   const [responseTimer, setResponseTimer] = useState(0);
   const [agentStatus, setAgentStatus] = useState<'thinking' | 'crud' | 'search' | 'tools' | 'responding'>('thinking');
+  const [pendingRoutinePlan, setPendingRoutinePlan] = useState<PendingRoutinePlan | null>(null);
 
   useEffect(() => {
     let interval: any;
@@ -2167,6 +2484,7 @@ const AIAssistant = ({
 
   const startNewChat = () => {
     setCurrentConversationId(null);
+    setPendingRoutinePlan(null);
     setMessages([{ role: 'bot', text: "Yo! I'm FitAI, your personal coach. Ready to crush today's workout?", timestamp: new Date() }]);
     setShowHistory(false);
   };
@@ -2215,7 +2533,7 @@ const AIAssistant = ({
     if (!user) return null;
     const convData = {
       userId: user.uid,
-                      title: firstMessage.slice(0, 30) + (firstMessage.length > 30 ? '...' : ''),
+      title: firstMessage.slice(0, 30) + (firstMessage.length > 30 ? '...' : ''),
       lastMessage: firstMessage,
       updatedAt: serverTimestamp()
     };
@@ -2230,7 +2548,7 @@ const AIAssistant = ({
         modelName: "gpt-5.4-mini",
         openAIApiKey: process.env.OPENAI_API_KEY,
         configuration: { dangerouslyAllowBrowser: true },
-        callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" 
+        callbacks: process.env.LANGCHAIN_TRACING_V2 === "true"
           ? [new LangChainTracer({ projectName: process.env.LANGCHAIN_PROJECT || "FitAI" })]
           : undefined
       });
@@ -2259,7 +2577,7 @@ New Neural Memory:`;
         ] : []
       });
       const newSummary = (response.content.toString() || summary).trim();
-      
+
       setSummary(newSummary);
       await setDoc(doc(db, 'users', user.uid, 'chat_summary', 'main'), {
         userId: user.uid,
@@ -2311,7 +2629,7 @@ New Neural Memory:`;
         } catch (error) {
           console.error("Whisper transcription failed:", error);
         }
-        
+
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -2344,37 +2662,41 @@ New Neural Memory:`;
     setIsTyping(true);
     await saveMessage('user', userMsg, convId);
 
-    const profileContext = profile ? `
-USER PROFILE:
-- Name: ${profile.name || 'Unknown'}
-- Gender: ${profile.gender || 'Not set'}
-- Age: ${profile.age || 'Not set'}
-- Weight: ${profile.weight ? `${profile.weight}kg` : 'Not set'}
-- Height: ${profile.height ? `${profile.height}cm` : 'Not set'}
-- Primary Goal: ${profile.goal || 'Not set'}
-- Detailed Aim: ${profile.aim || 'Not set'}
-` : "No profile data available.";
+    const profileContext = profile ? `USER PROFILE:
+- Name: ${profile.name || 'Unknown'} | Age: ${profile.age || '?'} | Sex: ${profile.sex || '?'} | Height: ${profile.height ? `${profile.height}cm` : '?'} | Weight: ${profile.weight ? `${profile.weight}kg` : '?'}
+- Short-term Goal: ${profile.shortTermGoal || profile.goal || 'Not set'}
+- Long-term Goal: ${profile.longTermGoal || 'Not set'}
+- Detailed Aim: ${profile.aim || 'Not set'}` : "No profile data available.";
 
-    const workoutContext = workouts.slice(0, 10).map(w => {
-      const date = format(new Date(w.date.seconds * 1000), 'MMM d yyyy');
-      const exerciseDetail = w.exercises.map(ex => {
-        const setsDetail = ex.sets
-          .filter(s => s.completed)
-          .map((s, i) => `Set${i+1}: ${s.weight}kg x ${s.reps}reps`)
-          .join(', ');
-        return `  • ${ex.name}: ${setsDetail}`;
-      }).join('\n');
-      return `[${date}] ${w.name} (Total Volume: ${w.totalVolume}kg, Duration: ${w.duration}min)\n${exerciseDetail}`;
-    }).join('\n\n');
+    // Compact last-7-workout summary: workout_id | name — date | exercises sets×[weight×reps]
+    const compactWorkoutSummary = workouts.slice(0, 7).map((w, i) => {
+      const wDate = w.date?.seconds ? format(new Date(w.date.seconds * 1000), 'MMM d') : 'Unknown';
+      const wid = w.id ? w.id.slice(0, 8) : `log_${i}`;
+      const exSummary = w.exercises.map(ex => {
+        const done = ex.sets.filter(s => s.completed);
+        if (!done.length) return `${ex.name}(no sets)`;
+        const setsStr = done.map(s => {
+          const sw = safeNumber(s.weight); const sr = safeNumber(s.reps);
+          return sw > 0 ? `${sw}kg×${sr}` : `BW×${sr}`;
+        }).join(',');
+        return `${ex.name} ${done.length}×[${setsStr}]`;
+      }).join(' | ');
+      return `${i + 1}. [${wid}] ${w.name} — ${wDate}: ${exSummary}`;
+    }).join('\n') || 'No workout history yet.';
 
     const exerciseListText = EXERCISES.map(e => `${e.id}: ${e.name}`).join('\n');
 
-    const systemInstruction = `You are FitAI. Background data for context — use only when relevant:
+    const systemInstruction = `You are FitAI — a high-performance personal fitness coach. Personalize every response using the data below.
+
 ${profileContext}
-RECENT WORKOUTS:
-${workoutContext}
+
+LAST 7 WORKOUTS (id | name — date | exercises sets×[weight×reps]):
+${compactWorkoutSummary}
+
 AVAILABLE EXERCISES:
-${exerciseListText}`;
+${exerciseListText}
+
+When planning workouts: avoid overtraining recent muscles, build on progression, align with user goals.`;
 
     try {
       // ─────────────────────────────────────────────────────
@@ -2391,18 +2713,37 @@ ${exerciseListText}`;
       // ─────────────────────────────────────────────────────
       // 2. TOOLS
       // ─────────────────────────────────────────────────────
+      let deferredRoutinePlan: AIRoutinePlan | null = null;
+      let allowRoutineCreate = false;
+
       const createRoutineTool = tool(async (args) => {
-        await onCreateRoutine(args);
-        return JSON.stringify({ success: true, action: "create", name: args.name, exerciseCount: args.exercises?.length ?? 0 });
+        const routine = normalizeRoutinePlan(args);
+        if (!allowRoutineCreate) {
+          deferredRoutinePlan = routine;
+          return JSON.stringify({
+            success: false,
+            action: "approval_required",
+            message: "Routine drafted but not created. Ask the user to approve or request changes before saving.",
+            routine
+          });
+        }
+
+        await onCreateRoutine(routine);
+        return JSON.stringify({ success: true, action: "create", name: routine.name, exerciseCount: routine.exercises.length });
       }, {
         name: "create_routine",
-        description: "Create a brand-new workout routine for the user with exercises and sets.",
+        description: "Create a brand-new workout routine only after the user has explicitly approved the final draft.",
         schema: z.object({
           name: z.string().describe("Name of the routine"),
+          description: z.string().optional().describe("Short routine description"),
           exercises: z.array(z.object({
             exerciseId: z.string().describe("Exact exercise ID from the exercise list"),
             name: z.string().describe("Human-readable exercise name"),
-            sets: z.array(z.object({ weight: z.number().describe("Weight in kg"), reps: z.number().describe("Number of reps") }))
+            sets: z.array(z.object({
+              weight: z.number().describe("Weight in kg"),
+              reps: z.number().describe("Number of reps"),
+              completed: z.boolean().optional()
+            }))
           }))
         })
       });
@@ -2481,7 +2822,7 @@ ${exerciseListText}`;
           id: w.id,
           name: w.name,
           date: w.date?.seconds ? format(new Date(w.date.seconds * 1000), 'MMM d yyyy') : 'Unknown date',
-          totalVolume: w.totalVolume,
+          totalVolume: getWorkoutVolume(w),
           duration: w.duration,
           exerciseCount: w.exercises.length
         }));
@@ -2503,13 +2844,14 @@ ${exerciseListText}`;
           name: workout.name,
           date: workout.date?.seconds ? format(new Date(workout.date.seconds * 1000), 'MMM d yyyy') : 'Unknown',
           duration: workout.duration,
-          totalVolume: workout.totalVolume,
+          totalVolume: getWorkoutVolume(workout),
           exercises: workout.exercises.map(ex => ({
             name: ex.name,
             sets: ex.sets.filter(s => s.completed).map((s, i) => ({
               setNumber: i + 1,
-              weight: s.weight,
-              reps: s.reps
+              weight: safeNumber(s.weight),
+              reps: safeNumber(s.reps),
+              timeTaken: safeNumber(s.timeTaken)
             }))
           }))
         });
@@ -2557,7 +2899,138 @@ ${exerciseListText}`;
       // ─────────────────────────────────────────────────────
       // 3. STATE GRAPH ANNOTATION
       // ─────────────────────────────────────────────────────
+      const showThinkingMessage = () => {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'bot', text: '...', timestamp: new Date(startTime) },
+        ]);
+      };
+
+      const completeBotResponse = async (text: string) => {
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === 'bot' && last.timestamp?.getTime?.() >= startTime) {
+            return [
+              ...prev.slice(0, -1),
+              { ...last, text },
+            ];
+          }
+          return [...prev, { role: 'bot', text, timestamp: new Date(startTime) }];
+        });
+
+        await saveMessage('bot', text, convId);
+        if (messages.length + 2 > MESSAGE_LIMIT) {
+          summarizeConversation([...messages, newMsg, { role: 'bot', text, timestamp: new Date() }]);
+        }
+      };
+
+      const draftRoutinePlan = async (request: string, currentRoutine?: AIRoutinePlan) => {
+        const plannerModel = model.withStructuredOutput(aiRoutinePlanSchema, { name: "routine_plan" });
+        const plannerPrompt = `You are FitAI's workout planning agent.
+
+Draft or revise a saved workout routine template, but never save it.
+Return only structured routine data matching the schema.
+
+Rules:
+- Use exerciseId values from AVAILABLE EXERCISES whenever possible.
+- Sets must contain weight in kg and reps.
+- Use 0kg for bodyweight movements.
+- Respect the user's profile, goal, and requested changes.
+- If revising, keep unchanged exercises unless the user requested changes.
+
+${profileContext}
+AVAILABLE EXERCISES:
+${exerciseListText}`;
+
+        const userPlanningPrompt = currentRoutine
+          ? `CURRENT DRAFT:
+${JSON.stringify(currentRoutine, null, 2)}
+
+USER CHANGE REQUEST:
+${request}`
+          : `USER WORKOUT REQUEST:
+${request}`;
+
+        const draft = await plannerModel.invoke([
+          new SystemMessage(plannerPrompt),
+          new HumanMessage(userPlanningPrompt)
+        ], { callbacks: [] });
+        const routine = normalizeRoutinePlan(draft);
+        if (routine.exercises.length === 0) {
+          throw new Error("I couldn't draft a valid workout routine from that request.");
+        }
+        return routine;
+      };
+
+      const createApprovedRoutineThroughCrud = async (routine: AIRoutinePlan) => {
+        allowRoutineCreate = true;
+        try {
+          const content = await createRoutineTool.invoke(routine, { callbacks: [] });
+          return typeof content === "string" ? JSON.parse(content) : content;
+        } finally {
+          allowRoutineCreate = false;
+        }
+      };
+
+      const activePendingRoutinePlan = pendingRoutinePlan?.conversationId === convId ? pendingRoutinePlan : null;
+
+      if (activePendingRoutinePlan) {
+        showThinkingMessage();
+
+        if (isRoutinePlanCancellation(userMsg)) {
+          setPendingRoutinePlan(null);
+          await completeBotResponse("No workout was saved. The pending plan has been discarded.");
+          return;
+        }
+
+        if (isRoutinePlanApproval(userMsg)) {
+          await createApprovedRoutineThroughCrud(activePendingRoutinePlan.routine);
+          setPendingRoutinePlan(null);
+          await completeBotResponse(`Saved **${activePendingRoutinePlan.routine.name}** to your workout library.`);
+          return;
+        }
+
+        if (!isRoutinePlanRevision(userMsg)) {
+          await completeBotResponse("I still have a workout draft waiting for approval. Reply **approve** to save it, tell me what to change, or say **cancel** to discard it.");
+          return;
+        }
+
+        const updatedRoutine = await draftRoutinePlan(userMsg, activePendingRoutinePlan.routine);
+        setPendingRoutinePlan({
+          ...activePendingRoutinePlan,
+          routine: updatedRoutine
+        });
+        await completeBotResponse(formatRoutineForApproval(updatedRoutine));
+        return;
+      }
+
+      if (isWorkoutCreationRequest(userMsg)) {
+        showThinkingMessage();
+        const draftedRoutine = await draftRoutinePlan(userMsg);
+        setPendingRoutinePlan({
+          conversationId: convId,
+          originalRequest: userMsg,
+          routine: draftedRoutine
+        });
+        await completeBotResponse(formatRoutineForApproval(draftedRoutine));
+        return;
+      }
+
+
+      // ─────────────────────────────────────────────────────
+      // FAST ROUTING: Client-side intent classifier (no LLM call)
+      // crud / search → skip Superior routing → 1 fewer LLM call
+      // ─────────────────────────────────────────────────────
+      const classifyMessageIntent = (text: string): 'crud' | 'search' | 'general' => {
+        const t = text.toLowerCase().trim();
+        if (/\b(list|show me my|view my|delete|remove|update|edit my|my routines?|my workouts?|workout (history|logs?)|how many (routines?|workouts?)|saved workouts?|do i have|i have planned)\b/.test(t)) return 'crud';
+        if (/\b(how (to|do i) (do|perform|execute)|what (is|are|muscles? does)|explain|benefits? of|proper form|technique|tips? for|nutrition|diet|supplement|injury|recovery|protein|calorie|macro)\b/.test(t)) return 'search';
+        return 'general';
+      };
+      const messageIntent = classifyMessageIntent(userMsg);
+
       const StateAnnotation = Annotation.Root({
+
         messages: Annotation<any[]>({ reducer: (x: any[], y: any[]) => x.concat(y) }),
       });
 
@@ -2586,7 +3059,7 @@ ${exerciseListText}`;
         const superiorPrompt = hasAlreadyDelegated
           ? `You are FitAI — a high-performance fitness coach. The sub-agent has finished its task and results are in the conversation history.
 
-PRESENT the results to the user in clean Markdown. Do NOT ask clarifying questions.
+PRESENT the results to the user in clean Markdown format use Tabular format where ever necessary. Do NOT ask clarifying questions.
 
 FORMAT RULES:
 - Routines listed → Markdown table: | Name | Exercise Count | Exercises |
@@ -2652,7 +3125,7 @@ RULE: Personal saved data → DELEGATE_TO_CRUD. Exercise knowledge/how-tos → D
       const crudAgent = async (state: typeof StateAnnotation.State) => {
         // Strip delegation signals from context (noise for CRUD)
         const cleanMessages: any[] = state.messages.filter(
-          (m: any) => !( (m._getType?.() === "ai" || m.role === "assistant") && !(m.tool_calls?.length) &&
+          (m: any) => !((m._getType?.() === "ai" || m.role === "assistant") && !(m.tool_calls?.length) &&
             (m.content?.toString().includes("DELEGATE_TO_CRUD") || m.content?.toString().includes("DELEGATE_TO_SEARCH")))
         );
 
@@ -2664,12 +3137,14 @@ RULE: Personal saved data → DELEGATE_TO_CRUD. Exercise knowledge/how-tos → D
 • update_profile — for profile changes
 
 ━━━ CRITICAL DISTINCTION ━━━
-• "Routines" = saved workout PLANS/TEMPLATES (not yet done)
-• "Workout logs" = sessions the user has ACTUALLY PERFORMED and recorded
+• "Saved Routines/Workouts" = saved PLANS/TEMPLATES/ROUTINES/WORKOUTS. (e.g., "list all workouts in my library","my routines", "saved workouts", "workout plans") → use list_routines
+• "Workout logs" = PAST PERFORMED sessions. (e.g., "workout history", "past workouts", "workouts I did") → use list_workouts
 • If user asks "what did I do in X", "show my workout history", "how many workouts" → use list_workouts / get_workout_log
 • If user asks "my routines", "workout plans", "training templates" → use list_routines / get_routine
 
 ━━━ AUTONOMOUS RESOLUTION ━━━
+• ALWAYS execute the user's LATEST request exactly as asked, even if they asked it previously.
+• Do NOT assume they want details unless they specify a routine/workout name.
 • ALWAYS call list_workouts first if you need to find a session by name. Then use the ID for get_workout_log.
 • ALWAYS call list_routines first if you need to find a routine by name. Then use the ID for get/update/delete.
 • Chain as many tool calls as needed. Do NOT stop until the task is fully completed.
@@ -2717,7 +3192,7 @@ After completing all tool calls, provide a clear summary of what you did so the 
       const searchAgent = async (state: typeof StateAnnotation.State) => {
         const searchModel = model.bindTools([tavilySearchTool, tavilyYouTubeTool]);
         const cleanMessages: any[] = state.messages.filter(
-          (m: any) => !( (m._getType?.() === "ai" || m.role === "assistant") && !(m.tool_calls?.length) &&
+          (m: any) => !((m._getType?.() === "ai" || m.role === "assistant") && !(m.tool_calls?.length) &&
             (m.content?.toString().includes("DELEGATE_TO_CRUD") || m.content?.toString().includes("DELEGATE_TO_SEARCH")))
         );
 
@@ -2765,7 +3240,7 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
           loopMessages.push(response);
           if (!response.tool_calls || response.tool_calls.length === 0) break;
           for (const call of response.tool_calls) {
-            let toolResult = "";
+            let toolResult: any = "";
             if (call.name === "tavily_search") {
               toolResult = await tavilySearchTool.invoke(call, { callbacks: [] });
             } else if (call.name === "youtube_search") {
@@ -2815,18 +3290,16 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
 
 
       // ─────────────────────────────────────────────────────
-      // 6. BUILD & COMPILE GRAPH
+      // 6. BUILD & COMPILE GRAPH (used for general/fallback path)
       // ─────────────────────────────────────────────────────
-      // Note: crud and search agents now handle tool execution internally
-      // in their own ReAct loops, so no separate tool nodes are needed.
       const workflow = new StateGraph(StateAnnotation)
         .addNode("superior", superiorAgent)
         .addNode("crud", crudAgent)
         .addNode("search", searchAgent)
         .addEdge("__start__", "superior")
         .addConditionalEdges("superior", routeFromSuperior)
-        .addEdge("crud", "superior")     // After CRUD finishes its loop → back to Superior
-        .addEdge("search", "superior");  // After Search finishes its loop → back to Superior
+        .addEdge("crud", "superior")
+        .addEdge("search", "superior");
 
       const app = workflow.compile();
 
@@ -2842,9 +3315,100 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
       ];
 
       // ─────────────────────────────────────────────────────
-      // 9. INVOKE GRAPH & EXTRACT RESPONSE
+      // 9. INVOKE: Fast routing or full graph
       // ─────────────────────────────────────────────────────
       let finalContent = "";
+
+      // Show thinking indicator
+      setMessages((prev) => [
+        ...prev,
+        { role: 'bot', text: '...', timestamp: new Date(startTime) },
+      ]);
+
+      // FAST PATH: crud messages → skip Superior routing, call CRUD agent directly
+      if (messageIntent === 'crud') {
+        setAgentStatus('crud');
+        const crudResult = await crudAgent({ messages: history });
+        setAgentStatus('responding');
+        const synthResp = await model.invoke([
+          new SystemMessage(`You are FitAI. The CRUD agent completed. Present the newly fetched results in clean Markdown.
+FORMAT RULES:
+- If listing multiple routines → Table: | Name | Exercises | Count |
+- If showing a specific routine's details → Table: | Exercise | Sets | Reps | Weight |
+- If listing workout history → Table: | Date | Name | Volume | Duration |
+- If showing a specific workout log's details → Table: | Exercise | Sets | Reps | Weight |
+- Create/Update/Delete → confirm with ✅ and summarize the change
+CRITICAL: ONLY present data provided in the agent's new tool results. Do NOT hallucinate descriptions or exercises.`),
+          ...history,
+          ...crudResult.messages
+        ], { callbacks: [] });
+        await completeBotResponse(synthResp.content.toString() || "Done!");
+        return;
+      }
+
+      // FAST PATH: search messages → skip Superior routing, call Search agent directly
+      if (messageIntent === 'search') {
+        setAgentStatus('search');
+        const searchResult = await searchAgent({ messages: history });
+        setAgentStatus('responding');
+        const synthResp = await model.invoke([
+          new SystemMessage(`You are FitAI. Present search results in structured Markdown:
+1. Key explanation (2-3 sentences)
+2. Bullet tips/steps
+3. Sources section: [Title](url) links
+4. Watch section (only if YouTube links found): [Title](url)`),
+          ...history,
+          ...searchResult.messages
+        ], { callbacks: [] });
+        await completeBotResponse(synthResp.content.toString() || "Here's what I found!");
+        return;
+      }
+
+      // GENERAL / COMPLEX: use full LangGraph (Superior routes → sub-agent → Superior synthesises)
+      const result = await app.invoke({ messages: history }, { callbacks: [] });
+
+      // Extract final response — walk in reverse, skip delegation signals
+      const allResultMessages = result?.messages || [];
+      if (deferredRoutinePlan) {
+        setPendingRoutinePlan({
+          conversationId: convId,
+          originalRequest: userMsg,
+          routine: deferredRoutinePlan
+        });
+        finalContent = formatRoutineForApproval(deferredRoutinePlan);
+      } else {
+        for (let i = allResultMessages.length - 1; i >= 0; i--) {
+          const m = allResultMessages[i];
+          const msgType = m._getType?.() || m.role || m.constructor?.name;
+          const isAI = msgType === "ai" || msgType === "assistant" || msgType === "AIMessage";
+          if (isAI && !m.tool_calls?.length) {
+            const text = m.content?.toString() || "";
+            if (!text.includes("DELEGATE_TO_") && text.trim().length > 0) {
+              finalContent = text;
+              break;
+            }
+          }
+        }
+      }
+
+      await completeBotResponse(finalContent || "I processed your request!");
+      setAgentStatus('thinking');
+      return;
+
+      // 8. HISTORY — last 10 turns for in-conversation memory
+      // ─────────────────────────────────────────────────────
+      const duplicateHistory = [
+        new SystemMessage(systemInstruction),
+        ...messages.slice(-10).map((m) =>
+          m.role === 'bot' ? new AIMessage(m.text) : new HumanMessage(m.text)
+        ),
+        new HumanMessage(userMsg)
+      ];
+
+      // ─────────────────────────────────────────────────────
+      // 9. INVOKE GRAPH & EXTRACT RESPONSE
+      // ─────────────────────────────────────────────────────
+      /* removed let finalContent */
 
       // Show a thinking indicator
       setMessages((prev) => [
@@ -2853,20 +3417,29 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
       ]);
 
       // Run the entire graph to completion
-      const result = await app.invoke({ messages: history }, { callbacks: [] });
-      
+      const duplicateResult = await app.invoke({ messages: duplicateHistory }, { callbacks: [] });
+
       // Extract the final response: walk the messages array in reverse and
       // find the first AIMessage that is NOT a delegation signal
-      const allResultMessages: any[] = result?.messages || [];
-      for (let i = allResultMessages.length - 1; i >= 0; i--) {
-        const m = allResultMessages[i];
-        const msgType = m._getType?.() || m.role || m.constructor?.name;
-        const isAI = msgType === "ai" || msgType === "assistant" || msgType === "AIMessage";
-        if (isAI && !m.tool_calls?.length) {
-          const content = m.content?.toString() || "";
-          if (!content.includes("DELEGATE_TO_") && content.trim().length > 0) {
-            finalContent = content;
-            break;
+      const duplicateResultMessages: any[] = duplicateResult?.messages || [];
+      if (deferredRoutinePlan) {
+        setPendingRoutinePlan({
+          conversationId: convId,
+          originalRequest: userMsg,
+          routine: deferredRoutinePlan
+        });
+        finalContent = formatRoutineForApproval(deferredRoutinePlan);
+      } else {
+        for (let i = duplicateResultMessages.length - 1; i >= 0; i--) {
+          const m = duplicateResultMessages[i];
+          const msgType = m._getType?.() || m.role || m.constructor?.name;
+          const isAI = msgType === "ai" || msgType === "assistant" || msgType === "AIMessage";
+          if (isAI && !m.tool_calls?.length) {
+            const content = m.content?.toString() || "";
+            if (!content.includes("DELEGATE_TO_") && content.trim().length > 0) {
+              finalContent = content;
+              break;
+            }
           }
         }
       }
@@ -2882,7 +3455,7 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
         }
         return [...prev, { role: 'bot', text: finalContent || "I processed your request!", timestamp: new Date(startTime) }];
       });
-      
+
       setAgentStatus('thinking');
 
 
@@ -2993,41 +3566,42 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
               ) : (
                 <>
                   {conversations.map(conv => (
-                  <div key={conv.id} className="relative group">
-                    <button
-                      onClick={() => {
-                        setCurrentConversationId(conv.id);
-                        setShowHistory(false);
-                      }}
-                      className={cn(
-                        "w-full text-left p-4 pr-10 rounded-2xl border transition-all",
-                        currentConversationId === conv.id
-                          ? "bg-[#CCFF00] border-[#CCFF00] text-black"
-                          : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-bold truncate pr-2">{conv.title}</span>
-                        <span className="text-[8px] opacity-60 font-mono">
-                          {conv.updatedAt?.seconds ? format(new Date(conv.updatedAt.seconds * 1000), 'MMM d') : 'Recent'}
-                        </span>
-                      </div>
-                      <p className={cn(
-                        "text-[10px] truncate",
-                        currentConversationId === conv.id ? "text-black/70" : "text-zinc-600"
-                      )}>
-                        {conv.lastMessage}
-                      </p>
-                    </button>
-                    {/* Delete button — appears on hover */}
-                    <button
-                      onClick={(e) => deleteConversation(conv.id, e)}
-                      title="Delete conversation"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-red-500/10 hover:bg-red-500/30 text-red-400 hover:text-red-300"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                    <div key={conv.id} className="relative group">
+                      <button
+                        onClick={() => {
+                          setCurrentConversationId(conv.id);
+                          setPendingRoutinePlan(null);
+                          setShowHistory(false);
+                        }}
+                        className={cn(
+                          "w-full text-left p-4 pr-10 rounded-2xl border transition-all",
+                          currentConversationId === conv.id
+                            ? "bg-[#CCFF00] border-[#CCFF00] text-black"
+                            : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-bold truncate pr-2">{conv.title}</span>
+                          <span className="text-[8px] opacity-60 font-mono">
+                            {conv.updatedAt?.seconds ? format(new Date(conv.updatedAt.seconds * 1000), 'MMM d') : 'Recent'}
+                          </span>
+                        </div>
+                        <p className={cn(
+                          "text-[10px] truncate",
+                          currentConversationId === conv.id ? "text-black/70" : "text-zinc-600"
+                        )}>
+                          {conv.lastMessage}
+                        </p>
+                      </button>
+                      {/* Delete button — appears on hover */}
+                      <button
+                        onClick={(e) => deleteConversation(conv.id, e)}
+                        title="Delete conversation"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-red-500/10 hover:bg-red-500/30 text-red-400 hover:text-red-300"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </>
               )}
@@ -3095,9 +3669,9 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
               <motion.div
                 animate={
                   agentStatus === 'crud' ? { scale: [1, 1.15, 1] } :
-                  agentStatus === 'search' ? { rotate: 360 } :
-                  agentStatus === 'tools' ? { y: [0, -4, 0] } :
-                  { rotate: 360 }
+                    agentStatus === 'search' ? { rotate: 360 } :
+                      agentStatus === 'tools' ? { y: [0, -4, 0] } :
+                        { rotate: 360 }
                 }
                 transition={
                   agentStatus === 'search' || agentStatus === 'thinking' || agentStatus === 'responding'
@@ -3123,8 +3697,8 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
                       transition={{ repeat: Infinity, duration: 1, delay }}
                       className={cn("w-1.5 h-1.5 rounded-full",
                         agentStatus === 'search' ? "bg-blue-400" :
-                        agentStatus === 'tools' ? "bg-orange-400" :
-                        "bg-[#CCFF00]"
+                          agentStatus === 'tools' ? "bg-orange-400" :
+                            "bg-[#CCFF00]"
                       )}
                     />
                   ))}
@@ -3132,8 +3706,8 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
                 <div className={cn(
                   "text-[10px] font-mono uppercase tracking-widest",
                   agentStatus === 'search' ? "text-blue-400 opacity-80" :
-                  agentStatus === 'tools' ? "text-orange-400 opacity-80" :
-                  "opacity-50"
+                    agentStatus === 'tools' ? "text-orange-400 opacity-80" :
+                      "opacity-50"
                 )}>
                   {agentStatus === 'thinking' && `Coach thinking... ${responseTimer}s`}
                   {agentStatus === 'crud' && `Fetching your data... ${responseTimer}s`}
@@ -3167,8 +3741,8 @@ User Goal: ${profile?.goal || 'General Fitness'}`;
               onClick={toggleListening}
               className={cn(
                 "p-2 rounded-lg transition-all duration-300",
-                isRecording 
-                  ? "bg-red-500 text-white shadow-lg shadow-red-500/40 scale-110 animate-pulse" 
+                isRecording
+                  ? "bg-red-500 text-white shadow-lg shadow-red-500/40 scale-110 animate-pulse"
                   : (chatTheme === 'light' ? "text-zinc-400 hover:text-black" : "text-zinc-500 hover:text-white")
               )}
             >
@@ -3216,6 +3790,7 @@ export default function App() {
   const [isLogging, setIsLogging] = useState(false);
   const [editingRoutine, setEditingRoutine] = useState<Routine | null | 'new'>(null);
   const [activeRoutine, setActiveRoutine] = useState<Routine | null>(null);
+  const [activeWorkoutSession, setActiveWorkoutSession] = useState<ActiveWorkoutSession | null>(null);
   const [workouts, setWorkouts] = useState<WorkoutLog[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);
 
@@ -3318,6 +3893,14 @@ export default function App() {
         }
         fetchWorkouts(u.uid);
         fetchRoutines(u.uid);
+        const restoredWorkout = loadActiveWorkoutSession(u.uid);
+        if (restoredWorkout) {
+          setActiveWorkoutSession(restoredWorkout);
+          setActiveRoutine(null);
+          setIsLogging(true);
+          setIsWorkoutMinimized(true);
+          setWorkoutStartTime(restoredWorkout.startTime);
+        }
       }
       setLoading(false);
     });
@@ -3477,6 +4060,7 @@ export default function App() {
   const signOutUser = async () => {
     await signOut(auth);
     setProfile(null);
+    setActiveWorkoutSession(null);
   };
 
   const updateProfile = async (data: Partial<UserProfile>) => {
@@ -3573,6 +4157,30 @@ export default function App() {
     }
   };
 
+  const startWorkout = (routine: Routine) => {
+    if (!user) return;
+    const session = createActiveWorkoutSession(user.uid, routine);
+    saveActiveWorkoutSession(session);
+    setActiveWorkoutSession(session);
+    setActiveRoutine(routine);
+    setIsLogging(true);
+    setIsWorkoutMinimized(false);
+    setWorkoutStartTime(session.startTime);
+    setWorkoutElapsed(0);
+  };
+
+  const closeActiveWorkout = (clearSession: boolean) => {
+    if (clearSession && user) {
+      clearActiveWorkoutSession(user.uid);
+    }
+    setIsLogging(false);
+    setIsWorkoutMinimized(false);
+    setActiveRoutine(null);
+    setActiveWorkoutSession(null);
+    setWorkoutStartTime(null);
+    setWorkoutElapsed(0);
+  };
+
   if (loading) return <LoadingScreen />;
 
   const sheetsContextValue = {
@@ -3622,18 +4230,13 @@ export default function App() {
             <WorkoutLogger
               routine={activeRoutine || undefined}
               workouts={workouts}
+              initialSession={activeWorkoutSession}
               onComplete={() => {
-                setIsLogging(false);
-                setIsWorkoutMinimized(false);
-                setActiveRoutine(null);
-                setWorkoutStartTime(null);
+                closeActiveWorkout(true);
                 fetchWorkouts(user.uid);
               }}
               onCancel={() => {
-                setIsLogging(false);
-                setIsWorkoutMinimized(false);
-                setActiveRoutine(null);
-                setWorkoutStartTime(null);
+                closeActiveWorkout(true);
               }}
             />
           </div>
@@ -3669,7 +4272,7 @@ export default function App() {
                   {activeTab === 'routines' && (
                     <RoutinesManager
                       routines={routines}
-                      onStart={(r) => { setActiveRoutine(r); setIsLogging(true); setIsWorkoutMinimized(false); setWorkoutStartTime(Date.now()); }}
+                      onStart={startWorkout}
                       onEdit={(r) => setEditingRoutine(r)}
                       onCreate={() => setEditingRoutine('new')}
                       onDelete={deleteRoutine}

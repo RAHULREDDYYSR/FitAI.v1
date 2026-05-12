@@ -7,6 +7,8 @@ export interface UserProfile {
   weight?: number;
   height?: number;
   goal?: string;
+  shortTermGoal?: string;  // Goal for the next few months
+  longTermGoal?: string;   // Long-horizon goal (1+ year)
   aim?: string;
   age?: number;
   sex?: 'male' | 'female' | 'other';
