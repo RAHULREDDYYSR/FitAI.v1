@@ -66,56 +66,17 @@ import {
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType, testFirestoreConnection } from './lib/firebase';
 import { cn } from './lib/utils';
-import { WorkoutLog, Routine, UserProfile, WorkoutExercise, Set as WorkoutSet, ChatMessage, ChatSummary, Conversation } from './types';
+import { WorkoutLog, Routine, UserProfile, WorkoutExercise, Set as WorkoutSet } from './types';
 import { EXERCISES } from './constants';
-import OpenAI from 'openai';
-import { ChatOpenAI } from "@langchain/openai";
-import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
-import { StateGraph, Annotation } from "@langchain/langgraph";
-import { tool } from "@langchain/core/tools";
-import { z } from "zod";
-import { traceable } from 'langsmith/traceable';
-import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis
-} from 'recharts';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { requestCoach, coachContext } from './lib/coach-api';
+import { applyGoalProposal } from './lib/coach-store';
+import type { CoachProposal } from './lib/coach-contract';
+import { DEMO_UID, demoUser, readDemo, updateDemoProfile, saveDemoRoutine, deleteDemoRoutine, saveDemoWorkout } from './lib/demo';
+import { safeNumber, getSetVolume, getWorkoutVolume, getWorkoutIntensity, getTimedOnlyActiveTime, formatSetPerformance } from './lib/workout-metrics';
 
-const aiRoutinePlanSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  exercises: z.array(z.object({
-    exerciseId: z.string(),
-    name: z.string(),
-    sets: z.array(z.object({
-      weight: z.number(),
-      reps: z.number(),
-      completed: z.boolean().optional()
-    }))
-  }))
-});
 
-type AIRoutinePlan = z.infer<typeof aiRoutinePlanSchema>;
-
-type PendingRoutinePlan = {
-  conversationId: string;
-  originalRequest: string;
-  routine: AIRoutinePlan;
-};
+const Coach = React.lazy(() => import('./components/Coach').then(module => ({ default: module.Coach })));
+const Dashboard = React.lazy(() => import('./components/Progress').then(module => ({ default: module.Dashboard })));
 
 type ActiveWorkoutExercise = WorkoutExercise & {
   sessionKey?: string;
@@ -135,70 +96,6 @@ type ActiveWorkoutSession = {
 const ACTIVE_WORKOUT_TTL_MS = 2 * 60 * 60 * 1000;
 
 const activeWorkoutStorageKey = (userId: string) => `fitai_active_workout_${userId}`;
-
-const safeNumber = (value: any, fallback = 0) => {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-};
-
-const getSetVolume = (set: Partial<WorkoutSet>) =>
-  safeNumber(set.weight) * safeNumber(set.reps);
-
-const getWorkoutVolume = (workout: Partial<WorkoutLog>) => {
-  const storedVolume = safeNumber(workout.totalVolume, Number.NaN);
-  if (Number.isFinite(storedVolume)) return storedVolume;
-  return (workout.exercises || []).reduce((total, exercise) =>
-    total + exercise.sets.reduce((setTotal, set) => setTotal + getSetVolume(set), 0), 0
-  );
-};
-
-const getWorkoutActiveTime = (workout: Partial<WorkoutLog>) =>
-  (workout.exercises || []).reduce((total, exercise) =>
-    total + exercise.sets.reduce((setTotal, set) => setTotal + safeNumber(set.timeTaken), 0), 0
-  );
-
-const getTimedOnlyActiveTime = (workout: Partial<WorkoutLog>) =>
-  (workout.exercises || []).reduce((total, exercise) =>
-    total + exercise.sets.reduce((setTotal, set) =>
-      setTotal + (safeNumber(set.reps) > 0 ? 0 : safeNumber(set.timeTaken)), 0
-    ), 0
-  );
-
-const getWorkoutIntensity = (workout: Partial<WorkoutLog>) => {
-  const storedIntensity = safeNumber(workout.intensity, Number.NaN);
-  if (Number.isFinite(storedIntensity) && storedIntensity > 0) return storedIntensity;
-
-  const duration = Math.max(safeNumber(workout.duration), 1);
-  const totalVolume = getWorkoutVolume(workout);
-  const timedOnlyActiveTime = getTimedOnlyActiveTime(workout);
-  const volumeIntensity = Math.round((totalVolume / duration) * 0.1 * 100);
-  const timedOnlyIntensity = Math.round((timedOnlyActiveTime / duration) * 100);
-  return volumeIntensity + timedOnlyIntensity;
-};
-
-const formatDuration = (seconds?: number) => {
-  const totalSeconds = safeNumber(seconds);
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
-
-const formatSetPerformance = (set: Partial<WorkoutSet>) => {
-  const weight = safeNumber(set.weight);
-  const reps = safeNumber(set.reps);
-  const timeTaken = safeNumber(set.timeTaken);
-  const parts: string[] = [];
-
-  if (weight > 0 || reps > 0) {
-    parts.push(`${weight > 0 ? `${weight} kg` : 'Bodyweight'} x ${reps} reps`);
-  }
-
-  if (reps <= 0 && timeTaken > 0) {
-    parts.push(formatDuration(timeTaken));
-  }
-
-  return parts.length > 0 ? parts.join(' | ') : 'Timed/bodyweight set';
-};
 
 const createActiveWorkoutSession = (userId: string, routine?: Routine | null): ActiveWorkoutSession => {
   const startTime = Date.now();
@@ -266,74 +163,12 @@ const clearActiveWorkoutSession = (userId: string) => {
   localStorage.removeItem(activeWorkoutStorageKey(userId));
 };
 
-const normalizeRoutinePlan = (rawRoutine: any): AIRoutinePlan => {
-  const rawExercises = Array.isArray(rawRoutine?.exercises) ? rawRoutine.exercises : [];
-  return {
-    name: String(rawRoutine?.name || 'AI Planned Workout').slice(0, 100),
-    description: rawRoutine?.description ? String(rawRoutine.description) : '',
-    exercises: rawExercises.map((rawExercise: any) => {
-      const catalogMatch = EXERCISES.find((exercise) =>
-        exercise.id === rawExercise?.exerciseId ||
-        exercise.name.toLowerCase() === String(rawExercise?.name || '').toLowerCase()
-      );
-      const rawSets = Array.isArray(rawExercise?.sets) ? rawExercise.sets : [];
-      return {
-        exerciseId: catalogMatch?.id || String(rawExercise?.exerciseId || rawExercise?.name || 'custom-exercise'),
-        name: catalogMatch?.name || String(rawExercise?.name || rawExercise?.exerciseId || 'Custom Exercise'),
-        sets: rawSets.map((rawSet: any) => ({
-          weight: safeNumber(rawSet?.weight),
-          reps: safeNumber(rawSet?.reps),
-          completed: false
-        }))
-      };
-    }).filter((exercise: WorkoutExercise) => exercise.name && exercise.sets.length > 0)
-  };
-};
-
-const formatRoutineForApproval = (routine: AIRoutinePlan) => {
-  const rows = routine.exercises.map((exercise) => {
-    const reps = exercise.sets.map((set) => set.reps).join(', ');
-    const weights = exercise.sets.map((set) => set.weight > 0 ? `${set.weight}kg` : 'Bodyweight').join(', ');
-    return `| ${exercise.name.replace(/\|/g, '\\|')} | ${exercise.sets.length} | ${reps} | ${weights} |`;
-  }).join('\n');
-
-  return `I drafted this workout, but I have not saved it yet.
-
-**${routine.name}**
-${routine.description ? `\n${routine.description}\n` : ''}
-| Exercise | Sets | Reps | Weight |
-|---|---:|---|---|
-${rows}
-
-Reply **approve** to save this workout, or tell me what to change.`;
-};
-
-const isWorkoutCreationRequest = (text: string) => {
-  const normalized = text.toLowerCase();
-  const hasCreateVerb = /\b(create|make|build|plan|design|generate|add)\b/.test(normalized);
-  const hasWorkoutTarget = /\b(workout|routine|plan|split|session|program|day)\b/.test(normalized);
-  const isReadOnly = /\b(list|show|view|get|find|what|which|history|delete|remove|update|edit)\b/.test(normalized);
-  return hasCreateVerb && hasWorkoutTarget && !isReadOnly;
-};
-
-const isRoutinePlanApproval = (text: string) => {
-  const normalized = text.toLowerCase();
-  const approval = /\b(approve|approved|yes|yeah|yep|confirm|save|create|add it|send it|go ahead|looks good|perfect)\b/.test(normalized);
-  const revision = /\b(but|change|swap|replace|remove|include|exclude|instead|adjust|modify|edit|update|more|less|harder|easier)\b/.test(normalized);
-  return approval && !revision;
-};
-
-const isRoutinePlanCancellation = (text: string) =>
-  /\b(cancel|discard|never mind|nevermind|do not save|don't save|stop)\b/i.test(text);
-
-const isRoutinePlanRevision = (text: string) =>
-  /\b(change|swap|replace|remove|add|include|exclude|instead|adjust|modify|edit|update|more|less|harder|easier|heavier|lighter|sets?|reps?|exercise|make|use|focus|target|avoid|without)\b/i.test(text);
-
 // --- Context & State ---
 const AuthContext = createContext<{
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  demo: boolean;
   signIn: () => Promise<void>;
   signOutUser: () => Promise<void>;
   sheets: {
@@ -354,42 +189,38 @@ function useAuth() {
 // --- Components ---
 
 const LoadingScreen = () => (
-  <div className="fixed inset-0 bg-[#0A0A0A] flex flex-col items-center justify-center space-y-4">
+  <div className="fixed inset-0 bg-[#0b1211] flex flex-col items-center justify-center space-y-4">
     <motion.div
       animate={{ rotate: 360 }}
       transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
     >
-      <Dumbbell className="w-12 h-12 text-[#CCFF00]" />
+      <Dumbbell className="w-12 h-12 text-[#C6F36B]" />
     </motion.div>
     <div className="text-white font-mono text-xs tracking-widest uppercase opacity-50">Initializing FitAI</div>
   </div>
 );
 
-const LoginScreen = () => {
+const LoginScreen = ({ onExplore }: { onExplore: () => void }) => {
   const { signIn } = useAuth();
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-[#0A0A0A] p-6 text-white text-center">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mb-12"
-      >
-        <Dumbbell className="w-20 h-20 text-[#CCFF00] mx-auto mb-6" />
-        <h1 className="text-6xl font-bold tracking-tighter mb-2">FitAI</h1>
-        <p className="text-zinc-400 max-w-[280px] mx-auto text-lg leading-tight">
-          Personalized muscle intelligence for the modern athlete.
-        </p>
-      </motion.div>
-
-      <button
-        onClick={signIn}
-        className="w-full max-w-[280px] bg-white text-black font-bold py-4 rounded-full flex items-center justify-center space-x-3 hover:bg-zinc-200 transition-colors"
-      >
-        <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-        <span>Continue with Google</span>
-      </button>
-    </div>
-  );
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  return <div className="landing-page">
+    <header className="landing-nav"><a href="/" className="brand"><span className="brand-mark"><Dumbbell className="w-5 h-5" /></span>fitai<span className="brand-dot">.</span></a><span className="landing-note">A stronger you, one session at a time.</span></header>
+    <main className="landing-grid">
+      <section className="landing-copy"><p className="eyebrow text-[#C6F36B]">Your training, with a little more direction</p><h1>Less guesswork.<br />More <span>good reps.</span></h1><p className="landing-description">A thoughtful training partner for your everyday progress. Build your routine, track what matters, and make changes with confidence.</p>
+        <div className="landing-actions"><button className="primary-button" disabled={busy} onClick={async () => { setBusy(true); setError(''); try { await signIn(); } catch (e: any) { setError(e.code === 'auth/popup-closed-by-user' ? 'Sign-in was closed. You can try again or explore the sample workspace.' : 'Could not sign in. Check your connection and try again.'); } finally { setBusy(false); } }}>{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserIcon className="w-4 h-4" />}Continue with Google<ChevronRight className="w-4 h-4" /></button><button className="secondary-button" disabled={busy} onClick={onExplore}>Explore sample workspace</button></div>
+        {error && <p className="inline-error" role="alert">{error}</p>}
+        <p className="landing-footnote">Your routines. Your pace. You review every coach-suggested change.</p>
+        <div className="landing-features"><div><Dumbbell className="w-4 h-4" /><span>Plans that fit your life</span></div><div><History className="w-4 h-4" /><span>Progress you can see</span></div><div><CheckCircle2 className="w-4 h-4" /><span>Changes you control</span></div></div>
+      </section>
+      <section className="landing-art" aria-label="Example training workspace">
+        <div className="orbit orbit-one" /><div className="orbit orbit-two" /><span className="art-caption">Built for the long game.</span>
+        <div className="training-preview"><div className="flex justify-between items-center"><span className="eyebrow text-zinc-400">Sample training plan</span><span className="preview-tag">Strength</span></div><h2>Find your rhythm.</h2><p>Three focused sessions. A little stronger each week.</p><div className="preview-days">{['M','T','W','T','F','S','S'].map((day,i)=><div key={i} className={[0,2,4].includes(i)?'training-day active':'training-day'}>{day}{[0,2,4].includes(i)?<Dumbbell className="w-4 h-4" />:<span>—</span>}</div>)}</div><div className="preview-session"><span className="coach-avatar"><Dumbbell className="w-5 h-5" /></span><div><strong>Upper body</strong><p>Controlled reps. Consistent progress.</p></div><Play className="w-4 h-4 ml-auto" /></div></div>
+        <div className="review-float"><CheckCircle2 className="w-5 h-5 text-[#C6F36B]" /><div><strong>You have the final say.</strong><p>Preview your changes before saving.</p></div></div>
+      </section>
+    </main>
+    <footer className="landing-footer"><span>Move with purpose.</span><span>FitAI · Train with intention</span></footer>
+  </div>;
 };
 
 // --- Sub-screens ---
@@ -441,7 +272,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
             }
           }}
           disabled={!name || selectedMuscleGroups.length === 0 || selectedEquipmentList.length === 0}
-          className="bg-[#CCFF00] text-black px-4 py-1.5 rounded-full text-xs font-bold disabled:opacity-50"
+          className="bg-[#C6F36B] text-black px-4 py-1.5 rounded-full text-xs font-bold disabled:opacity-50"
         >
           Save
         </button>
@@ -455,7 +286,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder="e.g. Incline Machine Press"
-            className="w-full bg-[#1A1A1A] border-none rounded-2xl p-4 text-white placeholder:text-zinc-700 focus:ring-1 focus:ring-[#CCFF00] outline-none text-lg font-bold"
+            className="w-full bg-[#131d1b] border-none rounded-2xl p-4 text-white placeholder:text-zinc-700 focus:ring-1 focus:ring-[#C6F36B] outline-none text-lg font-bold"
             autoFocus
           />
         </div>
@@ -469,7 +300,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
                 onClick={() => toggleMuscle(m)}
                 className={cn(
                   "p-3 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all text-left flex items-center justify-between",
-                  selectedMuscleGroups.includes(m) ? "bg-[#CCFF00] text-black border-[#CCFF00]" : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                  selectedMuscleGroups.includes(m) ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-400 border-zinc-800"
                 )}
               >
                 <span>{m}</span>
@@ -488,7 +319,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
                 onClick={() => toggleEquipment(e)}
                 className={cn(
                   "p-3 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all text-left flex items-center justify-between",
-                  selectedEquipmentList.includes(e) ? "bg-[#CCFF00] text-black border-[#CCFF00]" : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                  selectedEquipmentList.includes(e) ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-400 border-zinc-800"
                 )}
               >
                 <span>{e}</span>
@@ -502,8 +333,10 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
   );
 };
 
-const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit, onEditModeChange }: { profile: UserProfile | null, workouts: WorkoutLog[], onUpdate: (data: Partial<UserProfile>) => void, onSignOut: () => void, forceExitEdit?: number, onEditModeChange?: (editing: boolean) => void }) => {
-  const { sheets } = useAuth();
+const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit, onEditModeChange }: { profile: UserProfile | null, workouts: WorkoutLog[], onUpdate: (data: Partial<UserProfile>, proposal?: CoachProposal) => Promise<void>, onSignOut: () => void, forceExitEdit?: number, onEditModeChange?: (editing: boolean) => void }) => {
+  const { sheets, user, demo } = useAuth();
+  const [suggestedGoal, setSuggestedGoal] = useState<{ key: "shortTermGoal" | "longTermGoal"; value: string; proposal?: CoachProposal } | null>(null);
+  const [goalError, setGoalError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
   // Exit edit mode when parent triggers back button
@@ -544,27 +377,27 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
     <div className="space-y-8 pb-24">
       <header className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
-          <div className="w-16 h-16 bg-[#CCFF00] rounded-full flex items-center justify-center text-black font-bold text-2xl uppercase">
-            {profile?.name?.[0] || 'U'}
+          <div className="w-16 h-16 bg-[#C6F36B] rounded-full flex items-center justify-center text-black font-bold text-2xl uppercase">
+            {(profile?.name || profile?.displayName || 'You')[0]}
           </div>
           <div>
-            <h2 className="text-2xl font-bold">{profile?.name}</h2>
+            <h2 className="text-2xl font-bold">{profile?.name || profile?.displayName || 'Your profile'}</h2>
             <p className="text-zinc-500 text-xs font-mono lowercase">{profile?.email}</p>
           </div>
         </div>
         <div className="flex space-x-2">
           <button
             onClick={() => setShowCalendar(true)}
-            className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl hover:border-[#CCFF00]/50 transition-colors"
+            className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl hover:border-[#C6F36B]/50 transition-colors"
           >
-            <Calendar className="w-5 h-5 text-[#CCFF00]" />
+            <Calendar className="w-5 h-5 text-[#C6F36B]" />
           </button>
           <button
             onClick={() => setIsEditing(!isEditing)}
             className={cn(
               "p-2 rounded-xl border transition-all flex items-center space-x-1.5",
               isEditing
-                ? "bg-[#CCFF00] text-black border-[#CCFF00] font-bold shadow-lg shadow-[#CCFF00]/20"
+                ? "bg-[#C6F36B] text-black border-[#C6F36B] font-bold shadow-lg shadow-[#C6F36B]/20"
                 : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700"
             )}
             title={isEditing ? "Save Profile" : "Edit Profile"}
@@ -584,14 +417,16 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
         </div>
       </header>
 
+      {goalError && <p className="inline-error" role="alert">{goalError}</p>}
+      {suggestedGoal && <section className="change-preview"><p className="eyebrow text-[#C6F36B]">{demo ? 'Sample suggestion' : 'Review before saving'}</p><h3 className="text-lg font-semibold mt-2">Suggested goal</h3><p className="mt-3">{suggestedGoal.value}</p><div className="flex gap-3 mt-4"><button className="primary-button" onClick={async () => { try { await onUpdate({ [suggestedGoal.key]: suggestedGoal.value }, suggestedGoal.proposal); setSuggestedGoal(null); setGoalError(''); } catch (e: any) { setGoalError(e.message || 'Your goal could not be saved. Try again.'); } }}>Apply goal</button><button className="secondary-button" onClick={() => setSuggestedGoal(null)}>Discard</button></div></section>}
       {/* Goal & Measurements */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-[#1A1A1A] p-6 rounded-3xl border border-zinc-800 space-y-5">
+        <div className="bg-[#131d1b] p-6 rounded-3xl border border-zinc-800 space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">My Vision &amp; Goals</h3>
             <div className="flex items-center space-x-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#CCFF00] animate-pulse" />
-              <p className="text-[9px] text-zinc-500 uppercase font-mono tracking-wider">AI Coaching Active</p>
+              <div className="w-1.5 h-1.5 rounded-full bg-[#C6F36B] animate-pulse" />
+              <p className="text-[9px] text-zinc-500 uppercase font-mono tracking-wider">Goals you control</p>
             </div>
           </div>
 
@@ -608,16 +443,22 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                   if (!aim) { alert("Add your aim or short-term goal first."); return; }
                   setIsRefiningShort(true);
                   try {
-                    const m = new ChatOpenAI({ modelName: "gpt-4o-mini", openAIApiKey: process.env.OPENAI_API_KEY, configuration: { dangerouslyAllowBrowser: true } });
-                    const res = await m.invoke(`You are an elite fitness coach. Distill the user's aim into a sharp SHORT-TERM goal (next 2-4 months). Under 12 words, action-oriented, specific.\nUser aim: "${aim}"\nCurrent short goal: "${profile?.shortTermGoal || 'None'}"\nRefined Short-term Goal (only the goal text, no quotes):`);
-                    onUpdate({ shortTermGoal: res.content.toString().trim().replace(/^"|"$/g, '') });
-                  } catch (e) { alert(`AI Refine failed: ${e.message}`); }
+                    if (demo) {
+                      setSuggestedGoal({ key: 'shortTermGoal', value: 'Train consistently three times a week' });
+                    } else {
+                      const response = await requestCoach(user!, false, { message: 'Refine my shortTermGoal into a concise realistic goal, using my stated aim. Propose only this profile field.', history: [], context: coachContext(profile, [], []), pending: null });
+                      const value = response.proposal?.profilePatch?.shortTermGoal;
+                      if (!value) throw new Error(response.text || 'No goal suggestion was returned.');
+                      setSuggestedGoal({ key: 'shortTermGoal', value, proposal: response.proposal! });
+                    }
+                  } catch (e: any) { setGoalError(e.message || 'Goal refinement is unavailable.'); }
                   finally { setIsRefiningShort(false); }
                 }}
                 className={cn("p-1.5 rounded-lg border transition-all flex items-center space-x-1",
-                  isRefiningShort ? "border-[#CCFF00]/50 text-[#CCFF00] animate-pulse" : "border-zinc-800 text-zinc-500 hover:text-[#CCFF00] hover:border-[#CCFF00]/40"
+                  isRefiningShort ? "border-[#C6F36B]/50 text-[#C6F36B] animate-pulse" : "border-zinc-800 text-zinc-500 hover:text-[#C6F36B] hover:border-[#C6F36B]/40"
                 )}
                 title="Refine short-term goal with AI"
+                aria-label="Refine short-term goal with AI"
               >
                 {isRefiningShort ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                 <span className="text-[9px] font-mono uppercase tracking-wider">Refine</span>
@@ -625,7 +466,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             </div>
             {isEditing ? (
               <input
-                className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#CCFF00]/50 outline-none transition-colors text-sm"
+                className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#C6F36B]/50 outline-none transition-colors text-sm"
                 value={profile?.shortTermGoal || ''}
                 placeholder="e.g. Gain 5kg lean muscle by August"
                 onChange={(e) => onUpdate({ shortTermGoal: e.target.value })}
@@ -648,16 +489,22 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                   if (!aim) { alert("Add your aim or long-term goal first."); return; }
                   setIsRefiningLong(true);
                   try {
-                    const m = new ChatOpenAI({ modelName: "gpt-4o-mini", openAIApiKey: process.env.OPENAI_API_KEY, configuration: { dangerouslyAllowBrowser: true } });
-                    const res = await m.invoke(`You are an elite fitness coach. Craft an ambitious LONG-TERM goal (1+ years). Under 15 words, visionary, specific milestone.\nUser aim: "${aim}"\nShort-term: "${profile?.shortTermGoal || 'None'}"\nCurrent long goal: "${profile?.longTermGoal || 'None'}"\nRefined Long-term Goal (only the goal text, no quotes):`);
-                    onUpdate({ longTermGoal: res.content.toString().trim().replace(/^"|"$/g, '') });
-                  } catch (e) { alert(`AI Refine failed: ${e.message}`); }
+                    if (demo) {
+                      setSuggestedGoal({ key: 'longTermGoal', value: 'Build a sustainable strength and mobility habit' });
+                    } else {
+                      const response = await requestCoach(user!, false, { message: 'Refine my longTermGoal into a concise realistic goal, using my stated aim. Propose only this profile field.', history: [], context: coachContext(profile, [], []), pending: null });
+                      const value = response.proposal?.profilePatch?.longTermGoal;
+                      if (!value) throw new Error(response.text || 'No goal suggestion was returned.');
+                      setSuggestedGoal({ key: 'longTermGoal', value, proposal: response.proposal! });
+                    }
+                  } catch (e: any) { setGoalError(e.message || 'Goal refinement is unavailable.'); }
                   finally { setIsRefiningLong(false); }
                 }}
                 className={cn("p-1.5 rounded-lg border transition-all flex items-center space-x-1",
-                  isRefiningLong ? "border-[#CCFF00]/50 text-[#CCFF00] animate-pulse" : "border-zinc-800 text-zinc-500 hover:text-[#CCFF00] hover:border-[#CCFF00]/40"
+                  isRefiningLong ? "border-[#C6F36B]/50 text-[#C6F36B] animate-pulse" : "border-zinc-800 text-zinc-500 hover:text-[#C6F36B] hover:border-[#C6F36B]/40"
                 )}
                 title="Refine long-term goal with AI"
+                aria-label="Refine long-term goal with AI"
               >
                 {isRefiningLong ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                 <span className="text-[9px] font-mono uppercase tracking-wider">Refine</span>
@@ -665,7 +512,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             </div>
             {isEditing ? (
               <input
-                className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#CCFF00]/50 outline-none transition-colors text-sm"
+                className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#C6F36B]/50 outline-none transition-colors text-sm"
                 value={profile?.longTermGoal || ''}
                 placeholder="e.g. Compete in Men's Physique by 2026"
                 onChange={(e) => onUpdate({ longTermGoal: e.target.value })}
@@ -680,7 +527,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">Detailed Aim &amp; Vision</p>
             {isEditing ? (
               <textarea
-                className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white text-xs resize-none h-20 focus:border-[#CCFF00]/50 outline-none transition-colors"
+                className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white text-xs resize-none h-20 focus:border-[#C6F36B]/50 outline-none transition-colors"
                 value={profile?.aim || ''}
                 placeholder="Describe what you want to achieve, your motivation, and your ultimate vision..."
                 onChange={(e) => onUpdate({ aim: e.target.value })}
@@ -732,7 +579,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
           </div>
         </div>
 
-        <div className="bg-[#1A1A1A] p-6 rounded-3xl border border-zinc-800 space-y-4">
+        <div className="bg-[#131d1b] p-6 rounded-3xl border border-zinc-800 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">Google Sheets</h3>
             <div className="flex items-center space-x-2">
@@ -744,7 +591,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                   Disconnect
                 </button>
               )}
-              <div className={cn("w-2 h-2 rounded-full", sheets.connected ? "bg-[#CCFF00]" : "bg-red-500")} />
+              <div className={cn("w-2 h-2 rounded-full", sheets.connected ? "bg-[#C6F36B]" : "bg-red-500")} />
             </div>
           </div>
 
@@ -759,7 +606,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             <button
               disabled={isCreatingSheet}
               onClick={handleCreateSheet}
-              className="w-full py-3 bg-[#CCFF00] text-black font-bold rounded-xl text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+              className="w-full py-3 bg-[#C6F36B] text-black font-bold rounded-xl text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
             >
               {isCreatingSheet ? 'Creating Sheet...' : 'Create Logging Sheet'}
             </button>
@@ -773,7 +620,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                     href={`https://docs.google.com/spreadsheets/d/${sheets.spreadsheetId}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[#CCFF00] hover:underline text-[10px] uppercase font-bold"
+                    className="text-[#C6F36B] hover:underline text-[10px] uppercase font-bold"
                   >
                     Open
                   </a>
@@ -794,7 +641,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             exit={{ opacity: 0, scale: 0.9 }}
             className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-6"
           >
-            <div className="bg-[#1A1A1A] w-full max-w-md rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl">
+            <div className="bg-[#131d1b] w-full max-w-md rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl">
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                 <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}><ChevronLeft /></button>
                 <h3 className="font-bold">{format(currentMonth, 'MMMM yyyy')}</h3>
@@ -815,7 +662,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                         key={i}
                         className={cn(
                           "aspect-square flex flex-col items-center justify-center rounded-xl relative",
-                          isToday && "ring-1 ring-[#CCFF00]"
+                          isToday && "ring-1 ring-[#C6F36B]"
                         )}
                       >
                         <span className="text-[10px] text-zinc-500 mb-1">{format(day, 'd')}</span>
@@ -830,7 +677,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                 </div>
                 <button
                   onClick={() => setShowCalendar(false)}
-                  className="w-full bg-[#CCFF00] text-black font-bold py-3 rounded-2xl mt-4"
+                  className="w-full bg-[#C6F36B] text-black font-bold py-3 rounded-2xl mt-4"
                 >
                   Close
                 </button>
@@ -850,536 +697,6 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
   );
 };
 
-const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const totalVolume = getWorkoutVolume(workout);
-  const intensity = getWorkoutIntensity(workout);
-  const efficiency = Math.round((totalVolume / (workout.exercises.length || 1)) / 10);
-
-  return (
-    <div
-      onClick={() => setIsExpanded(!isExpanded)}
-      className={cn(
-        "bg-[#1A1A1A] rounded-2xl border transition-all cursor-pointer overflow-hidden",
-        isExpanded ? "border-[#CCFF00]/50" : "border-zinc-800 hover:border-zinc-700"
-      )}
-    >
-      <div className="p-5 space-y-4">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="text-lg font-bold tracking-tight">{workout.name}</div>
-            <div className="text-xs text-zinc-500 font-mono italic">
-              {format(new Date(workout.date.seconds * 1000), 'EEEE, MMMM d')}
-            </div>
-          </div>
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                const workoutDate = format(new Date(workout.date.seconds * 1000), 'EEEE, MMMM d');
-                const exercisesList = workout.exercises.map(ex => `- ${ex.name}: ${ex.sets.length} sets`).join('\n');
-                const text = `I just crushed a workout on FitAI!\n\nWorkout: ${workout.name}\nDate: ${workoutDate}\nTotal Volume: ${totalVolume.toLocaleString()} kg\nExercises:\n${exercisesList}\nDuration: ${Math.floor(workout.duration / 60)} mins\n\n#FitAI #Fitness #Workout`;
-
-                if (navigator.share) {
-                  navigator.share({
-                    title: 'My FitAI Workout',
-                    text: text,
-                    url: window.location.href
-                  }).catch(console.error);
-                } else {
-                  navigator.clipboard.writeText(text);
-                  alert("Workout summary copied to clipboard!");
-                }
-              }}
-              className="p-2 text-zinc-600 hover:text-[#CCFF00] transition-colors"
-              title="Share Workout"
-            >
-              <Share2 className="w-4 h-4" />
-            </button>
-            <div className="text-right">
-              <div className="text-[#CCFF00] font-bold">{totalVolume} kg</div>
-              <div className="text-[10px] text-zinc-500 font-mono">{Math.floor(workout.duration / 60)} mins</div>
-            </div>
-            {isExpanded ? (
-              <ChevronDown className="w-5 h-5 text-zinc-600" />
-            ) : (
-              <ChevronRight className="w-5 h-5 text-zinc-600" />
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center space-x-4 py-2 border-y border-zinc-800/30">
-          <div className="flex flex-col">
-            <span className="text-[9px] text-zinc-500 uppercase font-mono">Intensity Score</span>
-            <span className="text-xs font-bold text-[#CCFF00]">{intensity} <span className="text-[10px] font-normal opacity-50 uppercase font-mono">pts</span></span>
-          </div>
-          <div className="h-4 w-px bg-zinc-800" />
-          <div className="flex flex-col">
-            <span className="text-[9px] text-zinc-500 uppercase font-mono">Efficiency</span>
-            <span className="text-xs font-bold text-white">{efficiency} pts</span>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {isExpanded && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
-            >
-              <div className="space-y-4 pt-4 border-t border-zinc-800/30 mt-2">
-                {workout.exercises.map((ex, exIdx) => (
-                  <div key={exIdx} className="space-y-3">
-                    <div className="text-xs font-bold text-zinc-300 flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <span>{ex.name}</span>
-                      </div>
-                      <span className="text-[10px] text-zinc-500 font-mono bg-zinc-800 px-2 py-0.5 rounded-full">
-                        {ex.sets.length} {ex.sets.length === 1 ? 'Set' : 'Sets'}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {ex.sets.map((set, sIdx) => (
-                        <div key={sIdx} className="bg-zinc-900/50 border border-zinc-800 p-2 rounded-lg flex flex-col justify-center">
-                          <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-tighter">Set {sIdx + 1}</span>
-                          <span className="text-xs font-bold text-zinc-400">
-                            {formatSetPerformance(set)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-};
-
-const Dashboard = ({ workouts, profile, onUpdateProfile }: {
-  workouts: WorkoutLog[],
-  profile: UserProfile | null,
-  onUpdateProfile: (data: Partial<UserProfile>) => Promise<any>
-}) => {
-  const [view, setView] = useState<'chart' | 'matrix'>('chart');
-  const [showTimeMatrix, setShowTimeMatrix] = useState(false);
-  const [filterType, setFilterType] = useState<'week' | 'month' | 'year' | 'custom' | 'all'>('all');
-  const [customRange, setCustomRange] = useState({ start: '', end: '' });
-  const [newWeight, setNewWeight] = useState('');
-  const [isAddingWeight, setIsAddingWeight] = useState(false);
-
-  const weightData = useMemo(() => {
-    if (!profile?.weightHistory) return [];
-
-    const now = new Date();
-    return profile.weightHistory.filter(wh => {
-      const date = new Date(wh.date);
-      if (filterType === 'all') return true;
-      if (filterType === 'week') return isAfter(date, startOfWeek(now));
-      if (filterType === 'month') return isAfter(date, startOfMonth(now));
-      if (filterType === 'year') return isAfter(date, startOfYear(now));
-      if (filterType === 'custom') {
-        const start = customRange.start ? new Date(customRange.start) : new Date(0);
-        const end = customRange.end ? new Date(customRange.end) : new Date();
-        end.setHours(23, 59, 59, 999);
-        return date >= start && date <= end;
-      }
-      return true;
-    }).sort((a, b) => a.date.localeCompare(b.date)).map(wh => ({
-      date: format(new Date(wh.date), 'MMM d'),
-      weight: wh.weight
-    }));
-  }, [profile?.weightHistory, filterType, customRange]);
-
-  const handleAddWeight = async () => {
-    if (!newWeight || isNaN(parseFloat(newWeight))) return;
-    setIsAddingWeight(true);
-    try {
-      const weight = parseFloat(newWeight);
-      const today = new Date().toISOString();
-      const newHistory = [...(profile?.weightHistory || []), { date: today, weight }];
-      await onUpdateProfile({
-        weight,
-        weightHistory: newHistory
-      });
-      setNewWeight('');
-    } finally {
-      setIsAddingWeight(false);
-    }
-  };
-
-  const filteredWorkouts = useMemo(() => {
-    const now = new Date();
-    return workouts.filter(w => {
-      const workoutDate = new Date(w.date.seconds * 1000);
-
-      if (filterType === 'all') return true;
-      if (filterType === 'week') return isAfter(workoutDate, startOfWeek(now));
-      if (filterType === 'month') return isAfter(workoutDate, startOfMonth(now));
-      if (filterType === 'year') return isAfter(workoutDate, startOfYear(now));
-      if (filterType === 'custom') {
-        const start = customRange.start ? new Date(customRange.start) : new Date(0);
-        const end = customRange.end ? new Date(customRange.end) : new Date();
-        end.setHours(23, 59, 59, 999);
-        return workoutDate >= start && workoutDate <= end;
-      }
-      return true;
-    });
-  }, [workouts, filterType, customRange]);
-
-  const data = filteredWorkouts.slice().reverse().map(w => ({
-    date: format(new Date(w.date.seconds * 1000), 'MMM d'),
-    volume: getWorkoutVolume(w),
-    duration: Math.floor(w.duration / 60)
-  }));
-
-  const muscleVolume = filteredWorkouts.reduce((acc, w) => {
-    w.exercises.forEach(ex => {
-      const vol = ex.sets.reduce((sAcc, s) => sAcc + getSetVolume(s), 0);
-      acc[ex.name] = (acc[ex.name] || 0) + vol;
-    });
-    return acc;
-  }, {} as Record<string, number>);
-
-  const radarData = useMemo(() => {
-    const categories: Record<string, number> = {
-      'Back': 0,
-      'Chest': 0,
-      'Core': 0,
-      'Shoulders': 0,
-      'Arms': 0,
-      'Legs': 0
-    };
-
-    filteredWorkouts.forEach(w => {
-      w.exercises.forEach(ex => {
-        let exerciseDef = EXERCISES.find(e => e.id === ex.exerciseId);
-
-        // Fallback: fuzzy name match
-        if (!exerciseDef) {
-          const cleanName = ex.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-          exerciseDef = EXERCISES.find(e =>
-            e.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanName
-          );
-        }
-
-        const completedSets = ex.sets.filter(s => s.completed);
-        if (completedSets.length === 0) return;
-
-        const totalReps = completedSets.reduce((acc, s) => acc + safeNumber(s.reps), 0);
-        const avgWeight = completedSets.reduce((acc, s) => acc + safeNumber(s.weight), 0) / completedSets.length;
-        const timedOnlySeconds = completedSets.reduce((acc, s) =>
-          acc + (safeNumber(s.reps) > 0 ? 0 : safeNumber(s.timeTaken)), 0
-        );
-        const effortUnits = totalReps > 0 ? completedSets.length * totalReps : Math.max(timedOnlySeconds / 10, completedSets.length);
-
-        // ─── EFFORT SCORE FORMULA ───────────────────────────────────────────
-        // Uses logarithmic scaling so heavy AND light exercises both score fairly.
-        // log(1 + sets × reps) captures "how much work done" regardless of weight.
-        // log(1 + avgWeight + 1) adds a small weight bonus so heavier isn't penalised,
-        //   but it's logarithmic so the bonus tapers off quickly.
-        // Result: 4×15 abs ≈ 13 pts, 4×8 squats @ 160kg ≈ 17 pts — both meaningful.
-        const effortScore = Math.log1p(effortUnits)
-          * Math.log1p(avgWeight + 1);
-
-        const groups = (exerciseDef?.muscle_groups && exerciseDef.muscle_groups.length > 0)
-          ? exerciseDef.muscle_groups
-          : [exerciseDef?.muscle || ''];
-
-        groups.forEach(groupRaw => {
-          const group = groupRaw.toLowerCase();
-          const share = effortScore / (groups.length || 1);
-
-          if (group.includes('back') || group.includes('lats') || group.includes('traps') || group.includes('rear delt')) {
-            categories['Back'] += share;
-          } else if (group.includes('chest')) {
-            categories['Chest'] += share;
-          } else if (group.includes('abdominal') || group.includes('core') || group.includes('abs') || group.includes('oblique')) {
-            categories['Core'] += share;
-          } else if (group.includes('shoulder') || group.includes('delt')) {
-            categories['Shoulders'] += share;
-          } else if (group.includes('bicep') || group.includes('tricep') || group.includes('arm') || group.includes('forearm')) {
-            categories['Arms'] += share;
-          } else if (group.includes('quad') || group.includes('hamstring') || group.includes('glute') || group.includes('calve') || group.includes('leg') || group.includes('adductor') || group.includes('abductor')) {
-            categories['Legs'] += share;
-          } else if (group.includes('full body')) {
-            const sixthShare = share / 6;
-            Object.keys(categories).forEach(k => { categories[k] += sixthShare; });
-          }
-        });
-      });
-    });
-
-    // Normalize to 0–100 so the radar always fills nicely
-    const maxVal = Math.max(...Object.values(categories), 1);
-    return Object.entries(categories).map(([subject, value]) => ({
-      subject,
-      value: Math.round((value / maxVal) * 100)
-    }));
-  }, [filteredWorkouts]);
-
-
-  return (
-    <div className="space-y-6 pb-24">
-      <header className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold">Progress</h2>
-          <div className="flex items-center space-x-2 mt-1">
-            <button
-              onClick={() => setView('chart')}
-              className={cn("text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded", view === 'chart' ? "bg-[#CCFF00] text-black" : "text-zinc-500")}
-            >
-              Chart
-            </button>
-            <button
-              onClick={() => setView('matrix')}
-              className={cn("text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded", view === 'matrix' ? "bg-[#CCFF00] text-black" : "text-zinc-500")}
-            >
-              Matrix
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          {view === 'matrix' && (
-            <button
-              onClick={() => setShowTimeMatrix(!showTimeMatrix)}
-              className={cn(
-                "px-3 py-1 rounded-full text-[10px] font-bold transition-all border",
-                showTimeMatrix ? "bg-[#CCFF00] border-[#CCFF00] text-black" : "bg-zinc-900 border-zinc-800 text-zinc-500"
-              )}
-            >
-              {showTimeMatrix ? 'Hide Time' : 'Show Time Matrix'}
-            </button>
-          )}
-          <div className="bg-[#1A1A1A] p-2 rounded-full">
-            <Sparkles className="w-5 h-5 text-[#CCFF00]" />
-          </div>
-        </div>
-      </header>
-
-      <div className="bg-[#1A1A1A] p-4 rounded-2xl border border-zinc-800 space-y-4">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center space-x-1 bg-black/30 p-1 rounded-xl">
-            {(['all', 'week', 'month', 'year', 'custom'] as const).map((type) => (
-              <button
-                key={type}
-                onClick={() => setFilterType(type)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all",
-                  filterType === type
-                    ? "bg-[#CCFF00] text-black"
-                    : "text-zinc-500 hover:text-zinc-300"
-                )}
-              >
-                {type}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center space-x-2 text-[10px] text-zinc-500 font-mono uppercase shrink-0">
-            <span className="w-2 h-2 rounded-full bg-[#CCFF00] animate-pulse" />
-            <span>{filteredWorkouts.length} Results</span>
-          </div>
-        </div>
-
-        {filterType === 'custom' && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            className="flex items-center space-x-2 pt-2 border-t border-zinc-800"
-          >
-            <div className="flex-1">
-              <label className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">Start</label>
-              <input
-                type="date"
-                value={customRange.start}
-                onChange={(e) => setCustomRange(prev => ({ ...prev, start: e.target.value }))}
-                className="w-full bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#CCFF00]/50"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">End</label>
-              <input
-                type="date"
-                value={customRange.end}
-                onChange={(e) => setCustomRange(prev => ({ ...prev, end: e.target.value }))}
-                className="w-full bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#CCFF00]/50"
-              />
-            </div>
-          </motion.div>
-        )}
-      </div>
-
-      {view === 'chart' ? (
-        <div className="space-y-4">
-          <div className="bg-[#1A1A1A] rounded-2xl p-4 border border-zinc-800 h-[240px]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">Training Volume</span>
-            </div>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data}>
-                <defs>
-                  <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#CCFF00" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#CCFF00" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="date" stroke="#525252" fontSize={10} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ background: '#0A0A0A', border: '1px solid #262626', borderRadius: '12px' }}
-                  itemStyle={{ color: '#CCFF00' }}
-                />
-                <Area type="monotone" dataKey="volume" stroke="#CCFF00" fillOpacity={1} fill="url(#colorVolume)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="bg-[#1A1A1A] rounded-2xl p-4 border border-zinc-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <span className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">Body Weight</span>
-                <span className="text-xl font-bold">{profile?.weight || '-'} <span className="text-[10px] text-zinc-500">kg</span></span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="number"
-                  placeholder="Today's kg"
-                  value={newWeight}
-                  onChange={(e) => setNewWeight(e.target.value)}
-                  className="w-20 bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#CCFF00]/50"
-                  step="0.1"
-                />
-                <button
-                  onClick={handleAddWeight}
-                  disabled={isAddingWeight || !newWeight}
-                  className="p-2 bg-[#CCFF00] text-black rounded-lg disabled:opacity-50"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="h-[180px]">
-              {weightData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={weightData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#262626" />
-                    <XAxis dataKey="date" stroke="#525252" fontSize={8} axisLine={false} tickLine={false} />
-                    <YAxis hide domain={['dataMin - 5', 'dataMax + 5']} />
-                    <Tooltip
-                      contentStyle={{ background: '#0A0A0A', border: '1px solid #262626', borderRadius: '12px', fontSize: '10px' }}
-                      itemStyle={{ color: '#CCFF00' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="weight"
-                      stroke="#CCFF00"
-                      strokeWidth={2}
-                      dot={{ fill: '#CCFF00', r: 3 }}
-                      activeDot={{ r: 5, stroke: '#CCFF00', strokeWidth: 2 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-zinc-600 border border-dashed border-zinc-800 rounded-xl">
-                  <p className="text-[10px] uppercase font-mono">No weight data for this range</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-[#1A1A1A] rounded-2x border border-zinc-800 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-mono">
-              <thead className="bg-zinc-900 text-zinc-500 uppercase tracking-tighter">
-                <tr>
-                  <th className="p-3 border-b border-zinc-800">Session</th>
-                  <th className="p-3 border-b border-zinc-800">Volume</th>
-                  {showTimeMatrix && <th className="p-3 border-b border-zinc-800">Time</th>}
-                  {showTimeMatrix && <th className="p-3 border-b border-zinc-800">Active</th>}
-                  {showTimeMatrix && <th className="p-3 border-b border-zinc-800">Intensity</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/50">
-                {workouts.slice(0, 10).map((w, i) => {
-                  const totalActiveTime = getTimedOnlyActiveTime(w);
-                  const totalVolume = getWorkoutVolume(w);
-                  return (
-                    <tr key={i} className="hover:bg-white/5 transition-colors">
-                      <td className="p-3 font-bold">{format(new Date(w.date.seconds * 1000), 'MMM d')}</td>
-                      <td className="p-3 text-[#CCFF00] font-bold">{totalVolume}kg</td>
-                      {showTimeMatrix && <td className="p-3 text-zinc-400">{Math.floor(w.duration / 60)}m</td>}
-                      {showTimeMatrix && <td className="p-3 text-zinc-500">{Math.floor(totalActiveTime / 60)}m</td>}
-                      {showTimeMatrix && <td className="p-3 text-[#CCFF00] font-bold">{getWorkoutIntensity(w) || '-'}</td>}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <div className="bg-[#1A1A1A] rounded-2xl p-4 border border-zinc-800 h-[300px] flex flex-col">
-        <div className="flex items-center space-x-2 text-[10px] text-zinc-500 uppercase font-mono mb-4">
-          <Sparkles className="w-3 h-3" />
-          <span>Muscle Intelligence Radar</span>
-        </div>
-        <ResponsiveContainer width="100%" height="100%">
-          <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-            <PolarGrid stroke="#262626" />
-            <PolarAngleAxis dataKey="subject" tick={{ fill: '#525252', fontSize: 10 }} />
-            <PolarRadiusAxis axisLine={false} tick={false} domain={[0, 'auto']} />
-            <Radar
-              name="Volume"
-              dataKey="value"
-              stroke="#CCFF00"
-              fill="#CCFF00"
-              fillOpacity={0.3}
-            />
-          </RadarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        {[
-          { label: 'Total Logs', value: filteredWorkouts.length, icon: History },
-          { label: 'Avg Volume', value: Math.round(filteredWorkouts.reduce((acc, curr) => acc + getWorkoutVolume(curr), 0) / (filteredWorkouts.length || 1)), icon: Dumbbell },
-        ].map((stat, i) => (
-          <div key={i} className="bg-[#1A1A1A] p-4 rounded-2xl border border-zinc-800">
-            <stat.icon className="w-4 h-4 text-zinc-500 mb-2" />
-            <div className="text-2xl font-bold tracking-tight">{stat.value}</div>
-            <div className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider">{stat.label}</div>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <h3 className="text-lg font-bold mb-4 flex items-center space-x-2">
-          <span>Recent Workouts</span>
-          <History className="w-4 h-4 text-zinc-500" />
-        </h3>
-        <div className="space-y-4">
-          {workouts.length === 0 ? (
-            <div className="bg-[#1A1A1A] p-8 rounded-2xl border border-dashed border-zinc-800 text-center">
-              <p className="text-zinc-500 text-sm italic">No logs yet. Start your engine.</p>
-            </div>
-          ) : (
-            workouts.slice(0, 3).map((w, idx) => (
-              <WorkoutCard key={idx} workout={w} />
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
   routines: Routine[],
   onStart: (r: Routine) => void,
@@ -1391,20 +708,22 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
     <div className="space-y-6 pb-24">
       <header className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold">Library</h2>
-          <p className="text-zinc-500 font-mono text-xs uppercase">Your Routines</p>
+          <p className="eyebrow text-[#C6F36B] mb-2">Your training, organized</p>
+          <h2 className="text-3xl font-semibold tracking-tight">Your workouts</h2>
+          <p className="text-zinc-400 text-sm mt-2">Routines for showing up, feeling good, and getting stronger.</p>
         </div>
         <button
           onClick={onCreate}
-          className="bg-[#CCFF00] text-black p-2 rounded-full shadow-lg shadow-[#CCFF00]/10"
+          className="primary-button"
+          aria-label="Create routine"
         >
-          <Plus className="w-6 h-6" />
+          <Plus className="w-4 h-4" /><span className="hidden sm:inline">New routine</span>
         </button>
       </header>
 
-      <div className="space-y-4">
+      <div className="routine-grid">
         {routines.length === 0 ? (
-          <div className="bg-[#1A1A1A] p-12 rounded-3xl border border-dashed border-zinc-800 text-center flex flex-col items-center">
+          <div className="bg-[#131d1b] p-12 rounded-3xl border border-dashed border-zinc-800 text-center flex flex-col items-center">
             <Dumbbell className="w-12 h-12 text-zinc-700 mb-4" />
             <p className="text-zinc-500 text-sm mb-6">No routines found. Create your first split to speed up your logs.</p>
             <button
@@ -1420,13 +739,14 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               key={r.id || i}
-              className="bg-[#1A1A1A] p-5 rounded-2xl border border-zinc-800 space-y-4 group hover:border-[#CCFF00]/30 transition-all relative overflow-hidden"
+              className="routine-card group"
             >
               <div className="flex items-start justify-between">
-                <div onClick={() => onEdit(r)} className="cursor-pointer flex-1">
-                  <h3 className="text-lg font-bold group-hover:text-[#CCFF00] transition-colors">{r.name}</h3>
-                  <p className="text-xs text-zinc-500 line-clamp-1">{r.exercises.map(e => e.name).join(', ')}</p>
-                </div>
+                <button onClick={() => onEdit(r)} className="text-left flex-1 min-w-0" aria-label={`Edit ${r.name}`}>
+                  <span className="routine-number">{String(i + 1).padStart(2, '0')}</span>
+                  <h3 className="text-xl font-semibold group-hover:text-[#C6F36B] transition-colors mt-5">{r.name}</h3>
+                  <p className="text-sm text-zinc-400 mt-2 line-clamp-2">{r.description || r.exercises.map(e => e.name).join(', ')}</p>
+                </button>
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={(e) => {
@@ -1435,6 +755,7 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
                     }}
                     className="p-3 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all relative z-10"
                     title="Delete Routine"
+                    aria-label={`Delete ${r.name}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -1443,12 +764,14 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
                       e.stopPropagation();
                       onStart(r);
                     }}
-                    className="bg-[#CCFF00] text-black p-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-[#CCFF00]/5 relative z-10"
+                    className="bg-[#C6F36B] text-black p-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-[#C6F36B]/5 relative z-10"
+                    aria-label={`Start ${r.name}`}
                   >
                     <Play className="w-4 h-4 fill-current" />
                   </button>
                 </div>
               </div>
+              <div className="routine-footer"><span><Dumbbell className="w-3.5 h-3.5" />{r.exercises.length} exercises</span><span>{r.exercises.reduce((n, e) => n + e.sets.length, 0)} sets</span><button onClick={() => onEdit(r)} className="ml-auto text-[#C6F36B]" aria-label={`View ${r.name}`}>View plan<ChevronRight className="w-4 h-4" /></button></div>
             </motion.div>
           ))
         )}
@@ -1538,7 +861,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
         <h2 className="text-lg font-bold">Exercises</h2>
         <button
           onClick={() => setShowCustomModal(true)}
-          className="p-2 text-[#CCFF00]"
+          className="p-2 text-[#C6F36B]"
           title="Add Custom Exercise"
         >
           <Plus className="w-6 h-6" />
@@ -1551,7 +874,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
           <input
             type="text"
             placeholder="Search exercise"
-            className="w-full bg-[#1A1A1A] border-none rounded-lg py-2.5 pl-10 pr-4 text-sm focus:ring-1 focus:ring-[#CCFF00]"
+            className="w-full bg-[#131d1b] border-none rounded-lg py-2.5 pl-10 pr-4 text-sm focus:ring-1 focus:ring-[#C6F36B]"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -1562,7 +885,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             onClick={() => setActiveFilter('equip')}
             className={cn(
               "py-2.5 rounded-md text-[10px] font-bold flex items-center justify-center space-x-1 border transition-all",
-              selectedEquip !== "All Equipment" ? "bg-[#CCFF00] text-black border-[#CCFF00]" : "bg-zinc-900 text-zinc-300 border-zinc-800"
+              selectedEquip !== "All Equipment" ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-300 border-zinc-800"
             )}
           >
             <span className="truncate max-w-[80px]">{selectedEquip}</span>
@@ -1572,7 +895,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             onClick={() => setActiveFilter('muscle')}
             className={cn(
               "py-2.5 rounded-md text-[10px] font-bold flex items-center justify-center space-x-1 border transition-all",
-              selectedMuscle !== "All Muscles" ? "bg-[#CCFF00] text-black border-[#CCFF00]" : "bg-zinc-900 text-zinc-300 border-zinc-800"
+              selectedMuscle !== "All Muscles" ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-300 border-zinc-800"
             )}
           >
             <span className="truncate max-w-[80px]">{selectedMuscle}</span>
@@ -1647,7 +970,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             <p className="text-zinc-500 italic">No matches found for this filter.</p>
             <button
               onClick={() => { setSelectedEquip("All Equipment"); setSelectedMuscle("All Muscles"); setSearch(''); }}
-              className="mt-4 text-[#CCFF00] text-sm font-bold"
+              className="mt-4 text-[#C6F36B] text-sm font-bold"
             >
               Reset Filters
             </button>
@@ -1670,7 +993,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="bg-[#1A1A1A] w-full max-h-[70vh] rounded-t-[32px] border-t border-zinc-800 overflow-hidden flex flex-col shadow-2xl"
+              className="bg-[#131d1b] w-full max-h-[70vh] rounded-t-[32px] border-t border-zinc-800 overflow-hidden flex flex-col shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
@@ -1694,7 +1017,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
                     className={cn(
                       "w-full text-left p-4 rounded-2xl transition-all flex items-center justify-between",
                       (activeFilter === 'equip' ? selectedEquip : selectedMuscle) === item
-                        ? "bg-[#CCFF00] text-black font-bold"
+                        ? "bg-[#C6F36B] text-black font-bold"
                         : "hover:bg-zinc-800 text-zinc-300"
                     )}
                   >
@@ -1729,6 +1052,8 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   const [description, setDescription] = useState(routine?.description || '');
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
   const [search, setSearch] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const addExercise = (exercise: typeof EXERCISES[0]) => {
     setExercises([...exercises, {
@@ -1756,17 +1081,19 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0A0A0A] p-6 pb-32">
+    <div className="flex flex-col min-h-screen bg-[#0b1211] p-6 pb-32">
       <header className="flex items-center justify-between mb-8">
         <button onClick={onCancel} className="text-zinc-500 font-bold">Cancel</button>
         <h2 className="text-lg font-bold">Edit Routine</h2>
         <button
-          onClick={() => onSave({ name, description, exercises })}
-          className="text-[#CCFF00] font-bold"
+          disabled={isSaving || !name.trim() || !exercises.length}
+          onClick={async () => { setIsSaving(true); setSaveError(''); try { await onSave({ name: name.trim(), description, exercises }); } catch { setSaveError('The routine could not be saved. Your edits are still here; check your connection and retry.'); } finally { setIsSaving(false); } }}
+          className="text-[#C6F36B] font-bold"
         >
-          Save
+          {isSaving ? 'Saving…' : 'Save'}
         </button>
       </header>
+      {saveError && <p className="inline-error" role="alert">{saveError}</p>}
 
       <div className="space-y-6">
         <div className="space-y-1">
@@ -1791,7 +1118,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
             <div key={exIdx} className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
-                  <h3 className="text-lg font-bold text-[#CCFF00]">{ex.name}</h3>
+                  <h3 className="text-lg font-bold text-[#C6F36B]">{ex.name}</h3>
                 </div>
                 <button
                   onClick={() => setExercises(exercises.filter((_, i) => i !== exIdx))}
@@ -1848,7 +1175,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
             onClick={() => setShowExerciseSelector(true)}
             className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-white font-bold"
           >
-            <Plus className="w-5 h-5 text-[#CCFF00]" />
+            <Plus className="w-5 h-5 text-[#C6F36B]" />
             <span>Add Exercises</span>
           </button>
         </div>
@@ -1879,7 +1206,7 @@ const ExerciseItem = ({
       value={ex}
       dragListener={false}
       dragControls={dragControls}
-      className="space-y-4 bg-[#0A0A0A] select-none"
+      className="space-y-4 bg-[#0b1211] select-none"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -1893,7 +1220,7 @@ const ExerciseItem = ({
               <div className="w-1 h-4 bg-zinc-700 rounded-full" />
             </div>
           </div>
-          <h3 className="text-xl font-bold text-[#CCFF00]">{ex.name}</h3>
+          <h3 className="text-xl font-bold text-[#C6F36B]">{ex.name}</h3>
         </div>
         <button
           onClick={() => setExercises(exercises.filter((_: any, i: number) => i !== exIdx))}
@@ -1924,7 +1251,7 @@ const ExerciseItem = ({
               key={sIdx}
               className={cn(
                 "grid grid-cols-6 gap-2 items-center p-2 rounded-xl transition-all duration-300",
-                set.completed ? "bg-[#CCFF00]/10 border border-[#CCFF00]/30 shadow-inner" : "bg-zinc-900 border border-transparent"
+                set.completed ? "bg-[#C6F36B]/10 border border-[#C6F36B]/30 shadow-inner" : "bg-zinc-900 border border-transparent"
               )}
             >
               <div className="font-mono text-sm text-center bg-zinc-800 py-1 rounded-md">{sIdx + 1}</div>
@@ -1951,7 +1278,7 @@ const ExerciseItem = ({
                   onChange={(e) => updateSet(exIdx, sIdx, 'timeTaken', parseTimeTaken(e.target.value))}
                   className={cn(
                     "bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-mono w-full",
-                    isTimerRunning ? "text-[#CCFF00] animate-pulse" : ""
+                    isTimerRunning ? "text-[#C6F36B] animate-pulse" : ""
                   )}
                 />
                 {!set.completed && !isTimerRunning && (
@@ -1959,7 +1286,7 @@ const ExerciseItem = ({
                     onClick={() => startSetTimer(exIdx, sIdx)}
                     className="absolute inset-0 bg-zinc-800/80 rounded opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
                   >
-                    <Play className="w-3 h-3 text-[#CCFF00]" />
+                    <Play className="w-3 h-3 text-[#C6F36B]" />
                   </button>
                 )}
               </div>
@@ -1968,7 +1295,7 @@ const ExerciseItem = ({
                   onClick={() => toggleSetComplete(exIdx, sIdx)}
                   className={cn(
                     "flex items-center justify-center p-1 rounded-lg transition-transform active:scale-90",
-                    set.completed ? "text-[#CCFF00]" : "text-zinc-700"
+                    set.completed ? "text-[#C6F36B]" : "text-zinc-700"
                   )}
                 >
                   {set.completed ? (
@@ -2025,6 +1352,7 @@ const WorkoutLogger = ({
   const [startTime] = useState(initialSession?.startTime || Date.now());
   const [elapsed, setElapsed] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [isComplete, setIsComplete] = useState(false);
   const [finalVolume, setFinalVolume] = useState(0);
   const [finalIntensity, setFinalIntensity] = useState(0);
@@ -2147,6 +1475,8 @@ const WorkoutLogger = ({
 
   const saveWorkout = async () => {
     if (exercises.length === 0 || isSaving) return;
+    if (!exercises.some(ex => ex.sets.some(set => set.completed))) { setSaveError('Complete at least one set before finishing your workout.'); return; }
+    setSaveError('');
     setIsSaving(true);
     const duration = Math.floor((Date.now() - startTime) / 1000);
     const sanitizedExercises = exercises.map(({ sessionKey, ...exercise }) => ({
@@ -2174,7 +1504,7 @@ const WorkoutLogger = ({
 
     try {
       const workoutData = {
-        userId: auth.currentUser?.uid,
+        userId: currentUserId,
         name,
         date: serverTimestamp(),
         duration,
@@ -2184,7 +1514,8 @@ const WorkoutLogger = ({
         createdAt: serverTimestamp()
       };
 
-      const docRef = await addDoc(collection(db, 'workouts'), workoutData);
+      if (currentUserId === DEMO_UID && sessionStorage.getItem('fitai_sample_mode') === 'true') saveDemoWorkout(workoutData);
+      else await addDoc(collection(db, 'workouts'), workoutData);
 
       // Log to Google Sheets if connected
       if (sheets.accessToken && profile?.spreadsheetId) {
@@ -2196,7 +1527,7 @@ const WorkoutLogger = ({
       clearActiveWorkoutSession(currentUserId);
       setIsComplete(true);
     } catch (e) {
-      console.error(e);
+      setSaveError('Your workout could not be saved. Your session is still here; check your connection and retry.');
       setIsSaving(false);
     }
   };
@@ -2255,13 +1586,13 @@ const WorkoutLogger = ({
 
   if (isComplete) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0A0A0A] p-6 text-center text-white">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0b1211] p-6 text-center text-white">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className="space-y-8 max-w-sm w-full"
         >
-          <div className="w-24 h-24 bg-[#CCFF00] rounded-full flex items-center justify-center mx-auto shadow-[0_0_50px_rgba(204,255,0,0.3)]">
+          <div className="w-24 h-24 bg-[#C6F36B] rounded-full flex items-center justify-center mx-auto shadow-[0_0_50px_rgba(204,255,0,0.3)]">
             <CheckCircle2 className="w-12 h-12 text-black" />
           </div>
           <div>
@@ -2271,7 +1602,7 @@ const WorkoutLogger = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-zinc-900/50 p-4 rounded-3xl border border-zinc-800">
-              <div className="text-2xl font-bold text-[#CCFF00]">{finalVolume} <span className="text-xs font-normal opacity-50 uppercase">kg</span></div>
+              <div className="text-2xl font-bold text-[#C6F36B]">{finalVolume} <span className="text-xs font-normal opacity-50 uppercase">kg</span></div>
               <div className="text-[10px] text-zinc-500 uppercase font-mono">Total Volume</div>
             </div>
             <div className="bg-zinc-900/50 p-4 rounded-3xl border border-zinc-800">
@@ -2295,7 +1626,7 @@ const WorkoutLogger = ({
                   alert("Workout summary copied to clipboard!");
                 }
               }}
-              className="w-full bg-[#CCFF00] text-black font-bold py-4 rounded-2xl flex items-center justify-center space-x-2"
+              className="w-full bg-[#C6F36B] text-black font-bold py-4 rounded-2xl flex items-center justify-center space-x-2"
             >
               <Share2 className="w-5 h-5" />
               <span>Share Achievement</span>
@@ -2313,8 +1644,8 @@ const WorkoutLogger = ({
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0A0A0A] pb-32">
-      <header className="sticky top-0 z-30 px-6 py-4 bg-[#0A0A0A]/95 backdrop-blur-sm border-b border-zinc-800/50">
+    <div className="flex flex-col min-h-screen bg-[#0b1211] pb-32">
+      <header className="sticky top-0 z-30 px-6 py-4 bg-[#0b1211]/95 backdrop-blur-sm border-b border-zinc-800/50">
         <input
           type="text"
           value={name}
@@ -2322,7 +1653,7 @@ const WorkoutLogger = ({
           className="text-lg font-bold bg-transparent border-none focus:ring-0 p-0 w-full break-words"
         />
         <div className="flex items-center justify-between mt-2">
-          <div className="flex items-center space-x-2 text-[#CCFF00] font-mono text-xs">
+          <div className="flex items-center space-x-2 text-[#C6F36B] font-mono text-xs">
             <Timer className="w-3 h-3" />
             <span>{formatTime(elapsed)}</span>
           </div>
@@ -2331,13 +1662,15 @@ const WorkoutLogger = ({
             <button
               onClick={saveWorkout}
               disabled={isSaving}
-              className="bg-[#CCFF00] text-black font-bold px-6 py-2 rounded-full text-sm shadow-lg shadow-[#CCFF00]/10 disabled:opacity-50"
+              className="bg-[#C6F36B] text-black font-bold px-6 py-2 rounded-full text-sm shadow-lg shadow-[#C6F36B]/10 disabled:opacity-50"
             >
               {isSaving ? 'Saving...' : 'Finish'}
             </button>
           </div>
         </div>
       </header>
+
+      {saveError && <p className="inline-error mx-6 mt-4" role="alert">{saveError}</p>}
 
       <Reorder.Group axis="y" values={exercises} onReorder={setExercises} className="flex-1 space-y-8 px-6 pt-6">
         {exercises.map((ex, exIdx) => (
@@ -2360,7 +1693,7 @@ const WorkoutLogger = ({
 
         <button
           onClick={() => setShowExerciseSelector(true)}
-          className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-[#CCFF00] font-bold hover:bg-zinc-800 transition-colors"
+          className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-[#C6F36B] font-bold hover:bg-zinc-800 transition-colors"
         >
           <Plus className="w-5 h-5" />
           <span>Add Exercise</span>
@@ -2371,1402 +1704,13 @@ const WorkoutLogger = ({
 };
 
 
-const AIAssistant = ({
-  workouts,
-  profile,
-  routines,
-  onCreateRoutine,
-  onUpdateRoutine,
-  onDeleteRoutine,
-  onListRoutines,
-  onGetRoutine,
-  onUpdateProfile
-}: {
-  workouts: WorkoutLog[],
-  profile: UserProfile | null,
-  routines: Routine[],
-  onCreateRoutine: (data: any) => Promise<any>,
-  onUpdateRoutine: (id: string, data: any) => Promise<any>,
-  onDeleteRoutine: (id: string) => Promise<any>,
-  onListRoutines: () => Promise<any[]>,
-  onGetRoutine: (id: string) => Promise<any>,
-  onUpdateProfile: (data: any) => Promise<any>
-}) => {
-  const { user } = useAuth();
-  const [prompt, setPrompt] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const [summary, setSummary] = useState<string>('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
-  const [chatTheme, setChatTheme] = useState<'dark' | 'light'>('dark');
-  const [responseTimer, setResponseTimer] = useState(0);
-  const [agentStatus, setAgentStatus] = useState<'thinking' | 'crud' | 'search' | 'tools' | 'responding'>('thinking');
-  const [pendingRoutinePlan, setPendingRoutinePlan] = useState<PendingRoutinePlan | null>(null);
-
-  useEffect(() => {
-    let interval: any;
-    if (isTyping) {
-      const start = Date.now();
-      interval = setInterval(() => {
-        setResponseTimer(Number(((Date.now() - start) / 1000).toFixed(1)));
-      }, 100);
-    } else {
-      setResponseTimer(0);
-      clearInterval(interval);
-    }
-    return () => clearInterval(interval);
-  }, [isTyping]);
-
-  // Load conversation list
-  useEffect(() => {
-    if (!user) return;
-    const q = query(
-      collection(db, 'users', user.uid, 'conversations'),
-      orderBy('updatedAt', 'desc')
-    );
-    const path = `users/${user.uid}/conversations`;
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setConversations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Conversation)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
-    return () => unsubscribe();
-  }, [user?.uid]);
-
-  // Load messages for current conversation
-  useEffect(() => {
-    if (!user) return;
-    if (!currentConversationId) {
-      setMessages([{ role: 'bot', text: "Yo! I'm FitAI, your personal coach. Ready to crush today's workout?", timestamp: new Date() }]);
-      setIsLoadingHistory(false);
-      return;
-    }
-
-    setIsLoadingHistory(true);
-    const q = query(
-      collection(db, 'users', user.uid, 'conversations', currentConversationId, 'messages'),
-      orderBy('timestamp', 'asc'),
-      limit(100)
-    );
-
-    const path = `users/${user.uid}/conversations/${currentConversationId}/messages`;
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ChatMessage));
-      if (msgs.length > 0) {
-        setMessages(msgs);
-      }
-      setIsLoadingHistory(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-      setIsLoadingHistory(false);
-    });
-
-    return () => unsubscribe();
-  }, [user?.uid, currentConversationId]);
-
-  // Load summary once
-  useEffect(() => {
-    if (!user) return;
-    const loadSummary = async () => {
-      const summaryDoc = await getDoc(doc(db, 'users', user.uid, 'chat_summary', 'main'));
-      if (summaryDoc.exists()) {
-        setSummary(summaryDoc.data().summary);
-      }
-    };
-    loadSummary();
-  }, [user?.uid]);
-
-  const startNewChat = () => {
-    setCurrentConversationId(null);
-    setPendingRoutinePlan(null);
-    setMessages([{ role: 'bot', text: "Yo! I'm FitAI, your personal coach. Ready to crush today's workout?", timestamp: new Date() }]);
-    setShowHistory(false);
-  };
-
-  const deleteConversation = async (convId: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // prevent triggering the conversation select
-    if (!user) return;
-    try {
-      // 1. Delete all messages inside the conversation
-      const msgsSnap = await getDocs(
-        collection(db, 'users', user.uid, 'conversations', convId, 'messages')
-      );
-      await Promise.all(msgsSnap.docs.map(d => deleteDoc(d.ref)));
-
-      // 2. Delete the conversation document itself
-      await deleteDoc(doc(db, 'users', user.uid, 'conversations', convId));
-
-      // 3. If the deleted conv was active, start a new chat
-      if (currentConversationId === convId) {
-        startNewChat();
-      }
-
-      // 4. Neural context stays intact — the summary in Firestore is NOT deleted.
-      // It will automatically incorporate remaining conversations next time summarization runs.
-    } catch (e) {
-      console.error('Failed to delete conversation:', e);
-    }
-  };
-
-  const saveMessage = async (role: 'user' | 'bot', text: string, convId: string) => {
-    if (!user) return;
-    const path = `users/${user.uid}/conversations/${convId}/messages`;
-    try {
-      const msg: ChatMessage = { role, text, timestamp: serverTimestamp() };
-      await addDoc(collection(db, 'users', user.uid, 'conversations', convId, 'messages'), msg);
-      await updateDoc(doc(db, 'users', user.uid, 'conversations', convId), {
-        lastMessage: text,
-        updatedAt: serverTimestamp()
-      });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, path);
-    }
-  };
-
-  const createConversation = async (firstMessage: string) => {
-    if (!user) return null;
-    const convData = {
-      userId: user.uid,
-      title: firstMessage.slice(0, 30) + (firstMessage.length > 30 ? '...' : ''),
-      lastMessage: firstMessage,
-      updatedAt: serverTimestamp()
-    };
-    const docRef = await addDoc(collection(db, 'users', user.uid, 'conversations'), convData);
-    return docRef.id;
-  };
-
-  const summarizeConversation = async (msgs: ChatMessage[]) => {
-    if (!user) return;
-    try {
-      const model = new ChatOpenAI({
-        modelName: "gpt-5.4-mini",
-        openAIApiKey: process.env.OPENAI_API_KEY,
-        configuration: { dangerouslyAllowBrowser: true },
-        callbacks: process.env.LANGCHAIN_TRACING_V2 === "true"
-          ? [new LangChainTracer({ projectName: process.env.LANGCHAIN_PROJECT || "FitAI" })]
-          : undefined
-      });
-
-      const promptText = `Analyze the following chat history and update the "Neural Memory".
-      
-Existing Memory (Chat History Summary):
-${summary}
-
-New Messages:
-${msgs.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n')}
-
-Rules:
-- Synthesize key information: new goals, preferences, physical issues, and RECENTLY DISCUSSED ROUTINES or SEARCH TOPICS.
-- Keep it under 200 words.
-- Maintain a structured, informative tone.
-- Capture routine IDs if mentioned, to help future CRUD operations.
-
-New Neural Memory:`;
-
-      const response = await model.invoke(promptText, {
-        callbacks: process.env.LANGCHAIN_TRACING_V2 === "true" ? [
-          new LangChainTracer({
-            projectName: process.env.LANGCHAIN_PROJECT || "FitAI",
-          })
-        ] : []
-      });
-      const newSummary = (response.content.toString() || summary).trim();
-
-      setSummary(newSummary);
-      await setDoc(doc(db, 'users', user.uid, 'chat_summary', 'main'), {
-        userId: user.uid,
-        summary: newSummary,
-        lastUpdated: serverTimestamp()
-      });
-    } catch (e) {
-      console.error("Summarization failed:", e);
-    }
-  };
-
-
-
-  const toggleListening = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const formData = new FormData();
-        formData.append('file', audioBlob, 'audio.webm');
-        formData.append('model', 'whisper-1');
-
-        try {
-          const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
-            },
-            body: formData
-          });
-          const data = await response.json();
-          if (data.text) {
-            setPrompt(prev => prev + ' ' + data.text);
-          }
-        } catch (error) {
-          console.error("Whisper transcription failed:", error);
-        }
-
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (error) {
-      console.error("Microphone access denied:", error);
-    }
-  };
-
-  const MESSAGE_LIMIT = 5;
-
-  const askAI = async () => {
-    if (!prompt.trim() || !user) return;
-    const userMsg = prompt;
-    const startTime = Date.now();
-
-    let convId = currentConversationId;
-    if (!convId) {
-      convId = await createConversation(userMsg);
-      if (convId) setCurrentConversationId(convId);
-    }
-
-    if (!convId) return;
-
-    const newMsg: ChatMessage = { role: 'user', text: userMsg, timestamp: new Date() };
-
-    setMessages(prev => [...prev, newMsg]);
-    setPrompt('');
-    setIsTyping(true);
-    await saveMessage('user', userMsg, convId);
-
-    const profileContext = profile ? `USER PROFILE:
-- Name: ${profile.name || 'Unknown'} | Age: ${profile.age || '?'} | Sex: ${profile.sex || '?'} | Height: ${profile.height ? `${profile.height}cm` : '?'} | Weight: ${profile.weight ? `${profile.weight}kg` : '?'}
-- Short-term Goal: ${profile.shortTermGoal || profile.goal || 'Not set'}
-- Long-term Goal: ${profile.longTermGoal || 'Not set'}
-- Detailed Aim: ${profile.aim || 'Not set'}` : "No profile data available.";
-
-    // Compact last-7-workout summary: workout_id | name — date | exercises sets×[weight×reps]
-    const compactWorkoutSummary = workouts.slice(0, 7).map((w, i) => {
-      const wDate = w.date?.seconds ? format(new Date(w.date.seconds * 1000), 'MMM d') : 'Unknown';
-      const wid = w.id ? w.id.slice(0, 8) : `log_${i}`;
-      const exSummary = w.exercises.map(ex => {
-        const done = ex.sets.filter(s => s.completed);
-        if (!done.length) return `${ex.name}(no sets)`;
-        const setsStr = done.map(s => {
-          const sw = safeNumber(s.weight); const sr = safeNumber(s.reps);
-          return sw > 0 ? `${sw}kg×${sr}` : `BW×${sr}`;
-        }).join(',');
-        return `${ex.name} ${done.length}×[${setsStr}]`;
-      }).join(' | ');
-      return `${i + 1}. [${wid}] ${w.name} — ${wDate}: ${exSummary}`;
-    }).join('\n') || 'No workout history yet.';
-
-    const exerciseListText = EXERCISES.map(e => `${e.id}: ${e.name}`).join('\n');
-
-    const systemInstruction = `You are FitAI — a high-performance personal fitness coach. Personalize every response using the data below.
-
-${profileContext}
-
-LAST 7 WORKOUTS (id | name — date | exercises sets×[weight×reps]):
-${compactWorkoutSummary}
-
-AVAILABLE EXERCISES:
-${exerciseListText}
-
-When planning workouts: avoid overtraining recent muscles, build on progression, align with user goals.`;
-
-    try {
-      // ─────────────────────────────────────────────────────
-      // 1. MODEL
-      // ─────────────────────────────────────────────────────
-      const model = new ChatOpenAI({
-        modelName: "gpt-4o-mini",
-        openAIApiKey: process.env.OPENAI_API_KEY,
-        configuration: { dangerouslyAllowBrowser: true },
-        // Disabling tracing as it's causing 403 errors and potentially blocking execution
-        callbacks: []
-      });
-
-      // ─────────────────────────────────────────────────────
-      // 2. TOOLS
-      // ─────────────────────────────────────────────────────
-      let deferredRoutinePlan: AIRoutinePlan | null = null;
-      let allowRoutineCreate = false;
-
-      const createRoutineTool = tool(async (args) => {
-        const routine = normalizeRoutinePlan(args);
-        if (!allowRoutineCreate) {
-          deferredRoutinePlan = routine;
-          return JSON.stringify({
-            success: false,
-            action: "approval_required",
-            message: "Routine drafted but not created. Ask the user to approve or request changes before saving.",
-            routine
-          });
-        }
-
-        await onCreateRoutine(routine);
-        return JSON.stringify({ success: true, action: "create", name: routine.name, exerciseCount: routine.exercises.length });
-      }, {
-        name: "create_routine",
-        description: "Create a brand-new workout routine only after the user has explicitly approved the final draft.",
-        schema: z.object({
-          name: z.string().describe("Name of the routine"),
-          description: z.string().optional().describe("Short routine description"),
-          exercises: z.array(z.object({
-            exerciseId: z.string().describe("Exact exercise ID from the exercise list"),
-            name: z.string().describe("Human-readable exercise name"),
-            sets: z.array(z.object({
-              weight: z.number().describe("Weight in kg"),
-              reps: z.number().describe("Number of reps"),
-              completed: z.boolean().optional()
-            }))
-          }))
-        })
-      });
-
-      const updateRoutineTool = tool(async (args) => {
-        // @ts-ignore
-        await onUpdateRoutine(args.id, args);
-        return JSON.stringify({ success: true, action: "update", id: args.id, name: args.name });
-      }, {
-        name: "update_routine",
-        description: "Update an existing routine by its ID. Call list_routines first if you only have a name.",
-        schema: z.object({
-          id: z.string().describe("Firestore document ID of the routine"),
-          name: z.string().optional(),
-          exercises: z.array(z.object({
-            exerciseId: z.string(),
-            name: z.string(),
-            sets: z.array(z.object({ weight: z.number(), reps: z.number() }))
-          })).optional()
-        })
-      });
-
-      const deleteRoutineTool = tool(async (args) => {
-        // @ts-ignore
-        await onDeleteRoutine(args.id);
-        return JSON.stringify({ success: true, action: "delete", id: args.id });
-      }, {
-        name: "delete_routine",
-        description: "Permanently delete a routine by its ID. Call list_routines first to find the ID from a name.",
-        schema: z.object({ id: z.string(), name: z.string().optional().describe("Human name for confirmation messaging") })
-      });
-
-      const listRoutinesTool = tool(async () => {
-        // @ts-ignore
-        const allRoutines = await onListRoutines();
-        return JSON.stringify(
-          (allRoutines || []).map((r: any) => ({
-            id: r.id,
-            name: r.name,
-            exerciseCount: r.exercises?.length ?? 0,
-            exercises: (r.exercises || []).map((e: any) => e.name)
-          }))
-        );
-      }, {
-        name: "list_routines",
-        description: "Fetch all workout routines belonging to the user. Returns IDs, names and exercise counts. Always call this before update/delete when you only have a routine name.",
-        schema: z.object({})
-      });
-
-      const getRoutineTool = tool(async (args) => {
-        // @ts-ignore
-        const routine = await onGetRoutine(args.id);
-        return JSON.stringify(routine);
-      }, {
-        name: "get_routine",
-        description: "Fetch the full details of a specific routine by its Firestore ID — exercises, sets, reps, weights.",
-        schema: z.object({ id: z.string().describe("Firestore document ID returned by list_routines") })
-      });
-
-      const updateProfileTool = tool(async (args) => {
-        await onUpdateProfile(args);
-        return JSON.stringify({ success: true, action: "profile_update", fields: Object.keys(args) });
-      }, {
-        name: "update_profile",
-        description: "Update the user's profile — goal, weight, age, etc.",
-        schema: z.object({
-          goal: z.string().optional(),
-          aim: z.string().optional(),
-          weight: z.number().optional(),
-          age: z.number().optional()
-        })
-      });
-
-      const listWorkoutsTool = tool(async () => {
-        const recentWorkouts = workouts.slice(0, 15).map(w => ({
-          id: w.id,
-          name: w.name,
-          date: w.date?.seconds ? format(new Date(w.date.seconds * 1000), 'MMM d yyyy') : 'Unknown date',
-          totalVolume: getWorkoutVolume(w),
-          duration: w.duration,
-          exerciseCount: w.exercises.length
-        }));
-        return JSON.stringify(recentWorkouts);
-      }, {
-        name: "list_workouts",
-        description: "List recent workout sessions (actual performed sessions, NOT routine templates). Use when user asks about workout history, how many workouts completed, or which days they trained.",
-        schema: z.object({ limit: z.number().optional().describe("Max number of workouts to return, default 15") })
-      });
-
-      const getWorkoutLogTool = tool(async ({ id, name }) => {
-        let workout = workouts.find(w => w.id === id);
-        if (!workout && name) {
-          workout = workouts.find(w => w.name.toLowerCase().includes(name.toLowerCase()));
-        }
-        if (!workout) return JSON.stringify({ error: `Workout not found. Call list_workouts first to see available sessions.` });
-        return JSON.stringify({
-          id: workout.id,
-          name: workout.name,
-          date: workout.date?.seconds ? format(new Date(workout.date.seconds * 1000), 'MMM d yyyy') : 'Unknown',
-          duration: workout.duration,
-          totalVolume: getWorkoutVolume(workout),
-          exercises: workout.exercises.map(ex => ({
-            name: ex.name,
-            sets: ex.sets.filter(s => s.completed).map((s, i) => ({
-              setNumber: i + 1,
-              weight: safeNumber(s.weight),
-              reps: safeNumber(s.reps),
-              timeTaken: safeNumber(s.timeTaken)
-            }))
-          }))
-        });
-      }, {
-        name: "get_workout_log",
-        description: "Get full details of a specific performed workout session: all exercises with actual sets, reps, and weights logged. Use when user asks 'what did I do in X workout' or 'show me my Y session details'.",
-        schema: z.object({
-          id: z.string().optional().describe("Workout session ID from list_workouts"),
-          name: z.string().optional().describe("Workout name to search by (e.g. 'Quads-Focused Lower Day')")
-        })
-      });
-
-      // Two Tavily tools: one for web, one specifically for YouTube
-      const tavilySearchTool = tool(async ({ query }) => {
-        const response = await fetch('https://api.tavily.com/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: process.env.TAVILY_API_KEY, query, search_depth: 'basic', max_results: 5 })
-        });
-        const data = await response.json();
-        return JSON.stringify((data.results || []).slice(0, 5).map((r: any) => ({ title: r.title, content: r.content, url: r.url })));
-      }, {
-        name: "tavily_search",
-        description: "Search the web for fitness knowledge: exercise science, nutrition, supplements, injury info, form guides, training methodology.",
-        schema: z.object({ query: z.string().describe("Precise search query") })
-      });
-
-      const tavilyYouTubeTool = tool(async ({ query }) => {
-        const ytQuery = `${query} site:youtube.com/shorts OR site:youtube.com/watch`;
-        const response = await fetch('https://api.tavily.com/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: process.env.TAVILY_API_KEY, query: ytQuery, search_depth: 'basic', max_results: 5 })
-        });
-        const data = await response.json();
-        const ytResults = (data.results || []).filter((r: any) => r.url?.includes('youtube.com')).slice(0, 3);
-        return JSON.stringify(ytResults.map((r: any) => ({ title: r.title, url: r.url })));
-      }, {
-        name: "youtube_search",
-        description: "Search YouTube for video demonstrations, shorts, or tutorials for an exercise or fitness topic.",
-        schema: z.object({ query: z.string().describe("Exercise or topic to find YouTube videos for") })
-      });
-
-
-      // ─────────────────────────────────────────────────────
-      // 3. STATE GRAPH ANNOTATION
-      // ─────────────────────────────────────────────────────
-      const showThinkingMessage = () => {
-        setMessages((prev) => [
-          ...prev,
-          { role: 'bot', text: '...', timestamp: new Date(startTime) },
-        ]);
-      };
-
-      const completeBotResponse = async (text: string) => {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.role === 'bot' && last.timestamp?.getTime?.() >= startTime) {
-            return [
-              ...prev.slice(0, -1),
-              { ...last, text },
-            ];
-          }
-          return [...prev, { role: 'bot', text, timestamp: new Date(startTime) }];
-        });
-
-        await saveMessage('bot', text, convId);
-        if (messages.length + 2 > MESSAGE_LIMIT) {
-          summarizeConversation([...messages, newMsg, { role: 'bot', text, timestamp: new Date() }]);
-        }
-      };
-
-      const draftRoutinePlan = async (request: string, currentRoutine?: AIRoutinePlan) => {
-        const plannerModel = model.withStructuredOutput(aiRoutinePlanSchema, { name: "routine_plan" });
-        const plannerPrompt = `You are FitAI's workout planning agent.
-
-Draft or revise a saved workout routine template, but never save it.
-Return only structured routine data matching the schema.
-
-Rules:
-- Use exerciseId values from AVAILABLE EXERCISES whenever possible.
-- Sets must contain weight in kg and reps.
-- Use 0kg for bodyweight movements.
-- Respect the user's profile, goal, and requested changes.
-- If revising, keep unchanged exercises unless the user requested changes.
-
-${profileContext}
-AVAILABLE EXERCISES:
-${exerciseListText}`;
-
-        const userPlanningPrompt = currentRoutine
-          ? `CURRENT DRAFT:
-${JSON.stringify(currentRoutine, null, 2)}
-
-USER CHANGE REQUEST:
-${request}`
-          : `USER WORKOUT REQUEST:
-${request}`;
-
-        const draft = await plannerModel.invoke([
-          new SystemMessage(plannerPrompt),
-          new HumanMessage(userPlanningPrompt)
-        ], { callbacks: [] });
-        const routine = normalizeRoutinePlan(draft);
-        if (routine.exercises.length === 0) {
-          throw new Error("I couldn't draft a valid workout routine from that request.");
-        }
-        return routine;
-      };
-
-      const createApprovedRoutineThroughCrud = async (routine: AIRoutinePlan) => {
-        allowRoutineCreate = true;
-        try {
-          const content = await createRoutineTool.invoke(routine, { callbacks: [] });
-          return typeof content === "string" ? JSON.parse(content) : content;
-        } finally {
-          allowRoutineCreate = false;
-        }
-      };
-
-      const activePendingRoutinePlan = pendingRoutinePlan?.conversationId === convId ? pendingRoutinePlan : null;
-
-      if (activePendingRoutinePlan) {
-        showThinkingMessage();
-
-        if (isRoutinePlanCancellation(userMsg)) {
-          setPendingRoutinePlan(null);
-          await completeBotResponse("No workout was saved. The pending plan has been discarded.");
-          return;
-        }
-
-        if (isRoutinePlanApproval(userMsg)) {
-          await createApprovedRoutineThroughCrud(activePendingRoutinePlan.routine);
-          setPendingRoutinePlan(null);
-          await completeBotResponse(`Saved **${activePendingRoutinePlan.routine.name}** to your workout library.`);
-          return;
-        }
-
-        if (!isRoutinePlanRevision(userMsg)) {
-          await completeBotResponse("I still have a workout draft waiting for approval. Reply **approve** to save it, tell me what to change, or say **cancel** to discard it.");
-          return;
-        }
-
-        const updatedRoutine = await draftRoutinePlan(userMsg, activePendingRoutinePlan.routine);
-        setPendingRoutinePlan({
-          ...activePendingRoutinePlan,
-          routine: updatedRoutine
-        });
-        await completeBotResponse(formatRoutineForApproval(updatedRoutine));
-        return;
-      }
-
-      if (isWorkoutCreationRequest(userMsg)) {
-        showThinkingMessage();
-        const draftedRoutine = await draftRoutinePlan(userMsg);
-        setPendingRoutinePlan({
-          conversationId: convId,
-          originalRequest: userMsg,
-          routine: draftedRoutine
-        });
-        await completeBotResponse(formatRoutineForApproval(draftedRoutine));
-        return;
-      }
-
-
-      // ─────────────────────────────────────────────────────
-      // FAST ROUTING: Client-side intent classifier (no LLM call)
-      // crud / search → skip Superior routing → 1 fewer LLM call
-      // ─────────────────────────────────────────────────────
-      const classifyMessageIntent = (text: string): 'crud' | 'search' | 'general' => {
-        const t = text.toLowerCase().trim();
-        if (/\b(list|show me my|view my|delete|remove|update|edit my|my routines?|my workouts?|workout (history|logs?)|how many (routines?|workouts?)|saved workouts?|do i have|i have planned)\b/.test(t)) return 'crud';
-        if (/\b(how (to|do i) (do|perform|execute)|what (is|are|muscles? does)|explain|benefits? of|proper form|technique|tips? for|nutrition|diet|supplement|injury|recovery|protein|calorie|macro)\b/.test(t)) return 'search';
-        return 'general';
-      };
-      const messageIntent = classifyMessageIntent(userMsg);
-
-      const StateAnnotation = Annotation.Root({
-
-        messages: Annotation<any[]>({ reducer: (x: any[], y: any[]) => x.concat(y) }),
-      });
-
-      // ─────────────────────────────────────────────────────
-      // 4. AGENT NODES
-      // ─────────────────────────────────────────────────────
-
-      /**
-       * SUPERIOR AGENT — The face of FitAI. Routes to sub-agents or answers directly.
-       * On second invocation (after a sub-agent ran), synthesises results for the user.
-       */
-      const superiorAgent = async (state: typeof StateAnnotation.State) => {
-        const allMessages = state.messages;
-
-        // Detect if we're returning from a sub-agent by checking if any prior AIMessage
-        // (non-tool-call) has a delegation signal — meaning we already dispatched.
-        const hasAlreadyDelegated = allMessages.some(
-          (m: any) =>
-            // Using more robust type check instead of instanceof
-            (m._getType?.() === "ai" || m.role === "assistant") &&
-            !(m.tool_calls?.length) &&
-            (m.content?.toString().includes("DELEGATE_TO_CRUD") ||
-              m.content?.toString().includes("DELEGATE_TO_SEARCH"))
-        );
-
-        const superiorPrompt = hasAlreadyDelegated
-          ? `You are FitAI — a high-performance fitness coach. The sub-agent has finished its task and results are in the conversation history.
-
-PRESENT the results to the user in clean Markdown format use Tabular format where ever necessary. Do NOT ask clarifying questions.
-
-FORMAT RULES:
-- Routines listed → Markdown table: | Name | Exercise Count | Exercises |
-- Routine details → Table: | Exercise | Sets | Reps | Weight |
-- Create/Update/Delete → Confirm with ✅ and summarize what changed
-- Search results → Structured answer with:
-  1. Key explanation in plain language
-  2. Bullet points for tips/steps
-  3. A "📚 Sources" section at the end with clickable Markdown links: [Title](url)
-  4. A "🎬 Watch" section (only if YouTube links exist) with clickable links: [Title](url)
-
-DO NOT output DELEGATE_TO_CRUD or DELEGATE_TO_SEARCH. Present the results NOW.`
-          : `You are FitAI — a fitness coach that routes requests to specialized agents.
-
-━━━ ROUTING RULES (MUST FOLLOW EXACTLY) ━━━
-
-OUTPUT ONLY "DELEGATE_TO_CRUD" if the user message involves:
-  • Listing / showing / viewing their saved workouts, routines, or plans
-  • Getting details of a specific workout routine they have saved
-  • Creating, adding, updating, editing, deleting their workouts/routines
-  • Their profile data (weight, goal, fitness level)
-
-EXAMPLES → DELEGATE_TO_CRUD:
-  "list my workouts" → DELEGATE_TO_CRUD
-  "list the workouts i have planned" → DELEGATE_TO_CRUD
-  "what workouts do i have" → DELEGATE_TO_CRUD
-  "show me my planned workouts" → DELEGATE_TO_CRUD
-  "how many routines are saved" → DELEGATE_TO_CRUD
-  "add an arms workout" → DELEGATE_TO_CRUD
-  "delete leg day" → DELEGATE_TO_CRUD
-
-OUTPUT ONLY "DELEGATE_TO_SEARCH" if the user asks for:
-  • How to perform an exercise (form, technique, tutorial)
-  • Explanation of an exercise (muscles worked, benefits)
-  • Fitness science, nutrition, supplements, injury prevention
-  • Anything that requires searching the internet for knowledge
-
-EXAMPLES → DELEGATE_TO_SEARCH:
-  "how to do hack squats" → DELEGATE_TO_SEARCH
-  "what muscles does deadlift work" → DELEGATE_TO_SEARCH
-  "best diet for muscle gain" → DELEGATE_TO_SEARCH
-  "how to fix knee pain from squats" → DELEGATE_TO_SEARCH
-
-RESPOND DIRECTLY only for pure greetings: "hi", "hey coach", "hello"
-
-RULE: Personal saved data → DELEGATE_TO_CRUD. Exercise knowledge/how-tos → DELEGATE_TO_SEARCH.`;
-
-        const response = await model.invoke([new SystemMessage(superiorPrompt), ...allMessages], { callbacks: [] });
-        return { messages: [response] };
-      };
-
-      /**
-       * CRUD AGENT — ReAct loop that chains tool calls autonomously.
-       * Will keep calling tools until the model stops requesting them.
-       */
-      const crudTools = [
-        createRoutineTool, updateRoutineTool, deleteRoutineTool,
-        listRoutinesTool, getRoutineTool, updateProfileTool,
-        listWorkoutsTool, getWorkoutLogTool  // Workout log tools for history queries
-      ];
-      const crudModel = model.bindTools(crudTools);
-
-      const crudAgent = async (state: typeof StateAnnotation.State) => {
-        // Strip delegation signals from context (noise for CRUD)
-        const cleanMessages: any[] = state.messages.filter(
-          (m: any) => !((m._getType?.() === "ai" || m.role === "assistant") && !(m.tool_calls?.length) &&
-            (m.content?.toString().includes("DELEGATE_TO_CRUD") || m.content?.toString().includes("DELEGATE_TO_SEARCH")))
-        );
-
-        const crudPrompt = `You are the CRUD Agent for FitAI. You manage routines, profile data, and workout history.
-        
-━━━ YOUR TOOLS ━━━
-• list_routines, get_routine, create_routine, update_routine, delete_routine — for saved routine TEMPLATES
-• list_workouts, get_workout_log — for actual PERFORMED workout session history
-• update_profile — for profile changes
-
-━━━ CRITICAL DISTINCTION ━━━
-• "Saved Routines/Workouts" = saved PLANS/TEMPLATES/ROUTINES/WORKOUTS. (e.g., "list all workouts in my library","my routines", "saved workouts", "workout plans") → use list_routines
-• "Workout logs" = PAST PERFORMED sessions. (e.g., "workout history", "past workouts", "workouts I did") → use list_workouts
-• If user asks "what did I do in X", "show my workout history", "how many workouts" → use list_workouts / get_workout_log
-• If user asks "my routines", "workout plans", "training templates" → use list_routines / get_routine
-
-━━━ AUTONOMOUS RESOLUTION ━━━
-• ALWAYS execute the user's LATEST request exactly as asked, even if they asked it previously.
-• Do NOT assume they want details unless they specify a routine/workout name.
-• ALWAYS call list_workouts first if you need to find a session by name. Then use the ID for get_workout_log.
-• ALWAYS call list_routines first if you need to find a routine by name. Then use the ID for get/update/delete.
-• Chain as many tool calls as needed. Do NOT stop until the task is fully completed.
-• When creating routines, use the user's weight and goal to set intelligent defaults.
-
-━━━ WEIGHT LOGIC ━━━
-Goal: ${profile?.goal || 'General'} | User Weight: ${profile?.weight || 70}kg
-- Use bodyweight-relative percentages for defaults.
-
-━━━ OUTPUT ━━━
-After completing all tool calls, provide a clear summary of what you did so the Superior Agent can synthesize a response.`;
-
-        // ReAct loop: keep calling tools until the model is done
-        const loopMessages: any[] = [new SystemMessage(crudPrompt), ...cleanMessages];
-        const MAX_ITERATIONS = 6;
-        let iterations = 0;
-        while (iterations < MAX_ITERATIONS) {
-          iterations++;
-          const response = await crudModel.invoke(loopMessages, { callbacks: [] });
-          loopMessages.push(response);
-          // If no more tool calls, we're done
-          if (!response.tool_calls || response.tool_calls.length === 0) break;
-          // Execute each tool call and add results to messages
-          for (const call of response.tool_calls) {
-            const t = crudTools.find((x) => x.name === call.name);
-            if (t) {
-              const content = await t.invoke(call, { callbacks: [] });
-              loopMessages.push(new ToolMessage({
-                tool_call_id: call.id,
-                content: typeof content === "string" ? content : JSON.stringify(content)
-              }));
-            }
-          }
-        }
-
-        // Return only new messages (the ones we added in this run)
-        const newMessages = loopMessages.slice(cleanMessages.length + 1); // skip system + existing
-        return { messages: newMessages };
-      };
-
-      /**
-       * SEARCH AGENT — ReAct loop for web + YouTube search.
-       * Performs two searches: one for web knowledge, one for YouTube video links.
-       */
-      const searchAgent = async (state: typeof StateAnnotation.State) => {
-        const searchModel = model.bindTools([tavilySearchTool, tavilyYouTubeTool]);
-        const cleanMessages: any[] = state.messages.filter(
-          (m: any) => !((m._getType?.() === "ai" || m.role === "assistant") && !(m.tool_calls?.length) &&
-            (m.content?.toString().includes("DELEGATE_TO_CRUD") || m.content?.toString().includes("DELEGATE_TO_SEARCH")))
-        );
-
-        // Determine if user explicitly asked for YouTube or is asking how to do an exercise
-        const lastUserMsg = cleanMessages.filter((m: any) => m._getType?.() === "human" || m.role === "user").pop();
-        const lastUserText = lastUserMsg?.content?.toString() || "";
-        const wantsYouTube = /youtube|video|watch|shorts|tutorial|how to do|how do i do|show me how/i.test(lastUserText);
-
-        const searchPrompt = `You are the Search Agent for FitAI. You retrieve fitness knowledge from the web.
-
-━━━ SEARCH STRATEGY ━━━
-1. ALWAYS call tavily_search first with a precise query about the topic.
-${wantsYouTube ? '2. ALSO call youtube_search to find video tutorials/shorts for the topic.' : '2. Only call youtube_search if the user explicitly asked for videos, demonstrations, or YouTube links.'}
-3. After getting results, write a STRUCTURED SUMMARY.
-
-━━━ OUTPUT FORMAT ━━━
-Provide your summary in this exact format:
-
-KEY_INFO:
-[2-4 sentence plain-language explanation of the topic]
-
-TIPS:
-- [actionable tip 1]
-- [actionable tip 2]
-- [etc]
-
-SOURCES:
-[title1]||[url1]
-[title2]||[url2]
-
-YOUTUBE:
-[video title1]||[youtube_url1]
-[video title2]||[youtube_url2]
-(Leave YOUTUBE section empty if no youtube results found)
-
-━━━ CONTEXT ━━━
-User Goal: ${profile?.goal || 'General Fitness'}`;
-
-        const loopMessages: any[] = [new SystemMessage(searchPrompt), ...cleanMessages];
-        const MAX_ITERATIONS = 4;
-        let iterations = 0;
-        while (iterations < MAX_ITERATIONS) {
-          iterations++;
-          const response = await searchModel.invoke(loopMessages, { callbacks: [] });
-          loopMessages.push(response);
-          if (!response.tool_calls || response.tool_calls.length === 0) break;
-          for (const call of response.tool_calls) {
-            let toolResult: any = "";
-            if (call.name === "tavily_search") {
-              toolResult = await tavilySearchTool.invoke(call, { callbacks: [] });
-            } else if (call.name === "youtube_search") {
-              toolResult = await tavilyYouTubeTool.invoke(call, { callbacks: [] });
-            }
-            if (toolResult) {
-              loopMessages.push(new ToolMessage({
-                tool_call_id: call.id,
-                content: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult)
-              }));
-            }
-          }
-        }
-
-        const newMessages = loopMessages.slice(cleanMessages.length + 1);
-        return { messages: newMessages };
-      };
-
-      // ─────────────────────────────────────────────────────
-      // 5. ROUTING LOGIC
-      // ─────────────────────────────────────────────────────
-
-      /**
-       * Route from Superior:
-       * - If we've already delegated once and Superior is now responding → END
-       * - Otherwise check delegation signals
-       */
-      const routeFromSuperior = (state: typeof StateAnnotation.State) => {
-        const msgs = state.messages;
-        const lastContent = msgs[msgs.length - 1].content.toString();
-
-        // Count prior delegation signals
-        const delegationCount = msgs.filter(
-          (m: any) =>
-            (m._getType?.() === "ai" || m.role === "assistant" || m.constructor?.name === "AIMessage") &&
-            !(m.tool_calls?.length) &&
-            (m.content?.toString().includes("DELEGATE_TO_CRUD") ||
-              m.content?.toString().includes("DELEGATE_TO_SEARCH"))
-        ).length;
-
-        // If we've already gone through a delegation cycle and this is the final response → END
-        if (delegationCount >= 1 && !lastContent.includes("DELEGATE_TO_")) return "__end__";
-        if (lastContent.includes("DELEGATE_TO_CRUD")) return "crud";
-        if (lastContent.includes("DELEGATE_TO_SEARCH")) return "search";
-        return "__end__";
-      };
-
-
-      // ─────────────────────────────────────────────────────
-      // 6. BUILD & COMPILE GRAPH (used for general/fallback path)
-      // ─────────────────────────────────────────────────────
-      const workflow = new StateGraph(StateAnnotation)
-        .addNode("superior", superiorAgent)
-        .addNode("crud", crudAgent)
-        .addNode("search", searchAgent)
-        .addEdge("__start__", "superior")
-        .addConditionalEdges("superior", routeFromSuperior)
-        .addEdge("crud", "superior")
-        .addEdge("search", "superior");
-
-      const app = workflow.compile();
-
-      // ─────────────────────────────────────────────────────
-      // 8. HISTORY — last 10 turns for in-conversation memory
-      // ─────────────────────────────────────────────────────
-      const history = [
-        new SystemMessage(systemInstruction),
-        ...messages.slice(-10).map((m) =>
-          m.role === 'bot' ? new AIMessage(m.text) : new HumanMessage(m.text)
-        ),
-        new HumanMessage(userMsg)
-      ];
-
-      // ─────────────────────────────────────────────────────
-      // 9. INVOKE: Fast routing or full graph
-      // ─────────────────────────────────────────────────────
-      let finalContent = "";
-
-      // Show thinking indicator
-      setMessages((prev) => [
-        ...prev,
-        { role: 'bot', text: '...', timestamp: new Date(startTime) },
-      ]);
-
-      // FAST PATH: crud messages → skip Superior routing, call CRUD agent directly
-      if (messageIntent === 'crud') {
-        setAgentStatus('crud');
-        const crudResult = await crudAgent({ messages: history });
-        setAgentStatus('responding');
-        const synthResp = await model.invoke([
-          new SystemMessage(`You are FitAI. The CRUD agent completed. Present the newly fetched results in clean Markdown.
-FORMAT RULES:
-- If listing multiple routines → Table: | Name | Exercises | Count |
-- If showing a specific routine's details → Table: | Exercise | Sets | Reps | Weight |
-- If listing workout history → Table: | Date | Name | Volume | Duration |
-- If showing a specific workout log's details → Table: | Exercise | Sets | Reps | Weight |
-- Create/Update/Delete → confirm with ✅ and summarize the change
-CRITICAL: ONLY present data provided in the agent's new tool results. Do NOT hallucinate descriptions or exercises.`),
-          ...history,
-          ...crudResult.messages
-        ], { callbacks: [] });
-        await completeBotResponse(synthResp.content.toString() || "Done!");
-        return;
-      }
-
-      // FAST PATH: search messages → skip Superior routing, call Search agent directly
-      if (messageIntent === 'search') {
-        setAgentStatus('search');
-        const searchResult = await searchAgent({ messages: history });
-        setAgentStatus('responding');
-        const synthResp = await model.invoke([
-          new SystemMessage(`You are FitAI. Present search results in structured Markdown:
-1. Key explanation (2-3 sentences)
-2. Bullet tips/steps
-3. Sources section: [Title](url) links
-4. Watch section (only if YouTube links found): [Title](url)`),
-          ...history,
-          ...searchResult.messages
-        ], { callbacks: [] });
-        await completeBotResponse(synthResp.content.toString() || "Here's what I found!");
-        return;
-      }
-
-      // GENERAL / COMPLEX: use full LangGraph (Superior routes → sub-agent → Superior synthesises)
-      const result = await app.invoke({ messages: history }, { callbacks: [] });
-
-      // Extract final response — walk in reverse, skip delegation signals
-      const allResultMessages = result?.messages || [];
-      if (deferredRoutinePlan) {
-        setPendingRoutinePlan({
-          conversationId: convId,
-          originalRequest: userMsg,
-          routine: deferredRoutinePlan
-        });
-        finalContent = formatRoutineForApproval(deferredRoutinePlan);
-      } else {
-        for (let i = allResultMessages.length - 1; i >= 0; i--) {
-          const m = allResultMessages[i];
-          const msgType = m._getType?.() || m.role || m.constructor?.name;
-          const isAI = msgType === "ai" || msgType === "assistant" || msgType === "AIMessage";
-          if (isAI && !m.tool_calls?.length) {
-            const text = m.content?.toString() || "";
-            if (!text.includes("DELEGATE_TO_") && text.trim().length > 0) {
-              finalContent = text;
-              break;
-            }
-          }
-        }
-      }
-
-      await completeBotResponse(finalContent || "I processed your request!");
-      setAgentStatus('thinking');
-      return;
-
-      // 8. HISTORY — last 10 turns for in-conversation memory
-      // ─────────────────────────────────────────────────────
-      const duplicateHistory = [
-        new SystemMessage(systemInstruction),
-        ...messages.slice(-10).map((m) =>
-          m.role === 'bot' ? new AIMessage(m.text) : new HumanMessage(m.text)
-        ),
-        new HumanMessage(userMsg)
-      ];
-
-      // ─────────────────────────────────────────────────────
-      // 9. INVOKE GRAPH & EXTRACT RESPONSE
-      // ─────────────────────────────────────────────────────
-      /* removed let finalContent */
-
-      // Show a thinking indicator
-      setMessages((prev) => [
-        ...prev,
-        { role: 'bot', text: '...', timestamp: new Date(startTime) },
-      ]);
-
-      // Run the entire graph to completion
-      const duplicateResult = await app.invoke({ messages: duplicateHistory }, { callbacks: [] });
-
-      // Extract the final response: walk the messages array in reverse and
-      // find the first AIMessage that is NOT a delegation signal
-      const duplicateResultMessages: any[] = duplicateResult?.messages || [];
-      if (deferredRoutinePlan) {
-        setPendingRoutinePlan({
-          conversationId: convId,
-          originalRequest: userMsg,
-          routine: deferredRoutinePlan
-        });
-        finalContent = formatRoutineForApproval(deferredRoutinePlan);
-      } else {
-        for (let i = duplicateResultMessages.length - 1; i >= 0; i--) {
-          const m = duplicateResultMessages[i];
-          const msgType = m._getType?.() || m.role || m.constructor?.name;
-          const isAI = msgType === "ai" || msgType === "assistant" || msgType === "AIMessage";
-          if (isAI && !m.tool_calls?.length) {
-            const content = m.content?.toString() || "";
-            if (!content.includes("DELEGATE_TO_") && content.trim().length > 0) {
-              finalContent = content;
-              break;
-            }
-          }
-        }
-      }
-
-      // Update the message in the UI with the real content
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === 'bot' && last.timestamp.getTime() >= startTime) {
-          return [
-            ...prev.slice(0, -1),
-            { ...last, text: finalContent || "I processed your request!" },
-          ];
-        }
-        return [...prev, { role: 'bot', text: finalContent || "I processed your request!", timestamp: new Date(startTime) }];
-      });
-
-      setAgentStatus('thinking');
-
-
-      // ─────────────────────────────────────────────────────
-      // 10. PERSIST & SUMMARIZE
-      // ─────────────────────────────────────────────────────
-      if (convId && finalContent) {
-        await saveMessage('bot', finalContent, convId);
-      }
-
-      if (messages.length + 2 > MESSAGE_LIMIT) {
-        summarizeConversation([...messages, newMsg, { role: 'bot', text: finalContent, timestamp: new Date() }]);
-      }
-    } catch (e: any) {
-      console.error("Coach Error:", e);
-      setMessages(prev => [...prev, { role: 'bot', text: `Sorry, something went wrong: ${e.message}`, timestamp: new Date() }]);
-    } finally {
-      setIsTyping(false);
-      setAgentStatus('thinking');
-    }
-  };
-
-  return (
-    <div className={cn(
-      "flex flex-col h-full relative transition-colors duration-300",
-      chatTheme === 'light' ? "bg-white text-zinc-900" : "bg-black text-white"
-    )}>
-      <header className={cn(
-        "flex items-center justify-between p-4 rounded-3xl border transition-colors mx-4 mt-4 mb-2",
-        chatTheme === 'light' ? "bg-zinc-50 border-zinc-200" : "bg-zinc-900/50 border-zinc-800"
-      )}>
-        <div className="flex items-center space-x-3">
-          <div className={cn(
-            "p-2 rounded-2xl",
-            chatTheme === 'light' ? "bg-zinc-200" : "bg-zinc-800"
-          )}>
-            <Brain className="w-5 h-5 text-lime-400" />
-          </div>
-          <div>
-            <h2 className="font-bold text-sm tracking-tight">Coach FitAI</h2>
-            <div className="flex items-center space-x-1">
-              <div className="w-1.5 h-1.5 rounded-full bg-lime-500 animate-pulse" />
-              <span className="text-[10px] uppercase tracking-widest opacity-50 font-medium">Neural Engine Active (v1.1)</span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={() => setChatTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-            className={cn(
-              "p-2 rounded-full transition-colors",
-              chatTheme === 'light' ? "bg-zinc-200 text-zinc-600" : "bg-zinc-800 text-zinc-400"
-            )}
-            title="Toggle Theme"
-          >
-            {chatTheme === 'light' ? <Moon className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
-          </button>
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className={cn(
-              "p-2 rounded-full transition-colors",
-              showHistory ? "bg-[#CCFF00] text-black" : (chatTheme === 'light' ? "bg-zinc-200 text-zinc-600" : "bg-zinc-800 text-zinc-400")
-            )}
-            title="Chat History"
-          >
-            <History className="w-5 h-5" />
-          </button>
-          <button
-            onClick={startNewChat}
-            className={cn(
-              "p-2 rounded-full transition-colors",
-              chatTheme === 'light' ? "bg-zinc-200 text-zinc-600" : "bg-zinc-800 text-zinc-400"
-            )}
-            title="New Chat"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-        </div>
-      </header>
-
-      <AnimatePresence>
-        {showHistory && (
-          <motion.div
-            initial={{ opacity: 0, x: 50 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 50 }}
-            className="absolute inset-0 z-50 bg-black/95 backdrop-blur-md p-4 rounded-3xl"
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-sm font-bold uppercase tracking-widest text-[#CCFF00]">Chat History</h3>
-              <button onClick={() => setShowHistory(false)} className="text-zinc-500 hover:text-white">
-                <ChevronLeft className="w-6 h-6 rotate-180" />
-              </button>
-            </div>
-            <div className="space-y-3 overflow-y-auto max-h-[70%] no-scrollbar px-1">
-              <button
-                onClick={startNewChat}
-                className="w-full flex items-center space-x-3 p-4 rounded-2xl bg-[#CCFF00]/10 border border-[#CCFF00]/20 text-[#CCFF00] font-bold text-sm"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Start New Conversation</span>
-              </button>
-              {conversations.length === 0 ? (
-                <div className="text-center py-12 text-zinc-600">
-                  <Clock className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                  <p className="text-xs">No past conversations yet</p>
-                </div>
-              ) : (
-                <>
-                  {conversations.map(conv => (
-                    <div key={conv.id} className="relative group">
-                      <button
-                        onClick={() => {
-                          setCurrentConversationId(conv.id);
-                          setPendingRoutinePlan(null);
-                          setShowHistory(false);
-                        }}
-                        className={cn(
-                          "w-full text-left p-4 pr-10 rounded-2xl border transition-all",
-                          currentConversationId === conv.id
-                            ? "bg-[#CCFF00] border-[#CCFF00] text-black"
-                            : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                        )}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-bold truncate pr-2">{conv.title}</span>
-                          <span className="text-[8px] opacity-60 font-mono">
-                            {conv.updatedAt?.seconds ? format(new Date(conv.updatedAt.seconds * 1000), 'MMM d') : 'Recent'}
-                          </span>
-                        </div>
-                        <p className={cn(
-                          "text-[10px] truncate",
-                          currentConversationId === conv.id ? "text-black/70" : "text-zinc-600"
-                        )}>
-                          {conv.lastMessage}
-                        </p>
-                      </button>
-                      {/* Delete button — appears on hover */}
-                      <button
-                        onClick={(e) => deleteConversation(conv.id, e)}
-                        title="Delete conversation"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-red-500/10 hover:bg-red-500/30 text-red-400 hover:text-red-300"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div className="flex-1 overflow-y-auto space-y-6 scroll-smooth px-4 pt-2 pb-40 no-scrollbar">
-        {isLoadingHistory && (
-          <div className="text-center p-8">
-            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: "linear" }}>
-              <Brain className="w-8 h-8 text-[#CCFF00] mx-auto opacity-50" />
-            </motion.div>
-            <p className="text-[10px] text-zinc-500 uppercase font-mono mt-4 tracking-widest">Accessing Neural Patterns...</p>
-          </div>
-        )}
-
-        <AnimatePresence mode="popLayout" initial={false}>
-          {messages.map((m, i) => (
-            <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              key={i}
-              className={cn(
-                "p-4 rounded-3xl text-sm shadow-md",
-                m.role === 'user'
-                  ? cn("max-w-[85%] ml-auto rounded-tr-none", chatTheme === 'light' ? "bg-[#CCFF00] text-black border border-[#CCFF00]/20" : "bg-zinc-800 text-white border border-zinc-700 shadow-white/5")
-                  : cn("max-w-full rounded-tl-none", chatTheme === 'light' ? "bg-zinc-900 text-white border border-zinc-800" : "bg-[#1A1A1A] text-white border border-zinc-800 shadow-lg shadow-black/20")
-              )}
-            >
-              <div className={cn(
-                "prose prose-sm max-w-none overflow-x-auto",
-                "prose-headings:font-bold prose-headings:mt-3 prose-headings:mb-1",
-                "prose-p:leading-relaxed prose-p:my-1",
-                "prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5",
-                "prose-table:text-xs prose-table:w-full prose-th:px-3 prose-th:py-1.5 prose-th:border prose-th:border-zinc-700 prose-td:px-3 prose-td:py-1.5 prose-td:border prose-td:border-zinc-700",
-                "prose-blockquote:border-l-2 prose-blockquote:border-[#CCFF00] prose-blockquote:pl-3 prose-blockquote:italic prose-blockquote:my-2",
-                "prose-code:text-[#CCFF00] prose-code:bg-zinc-800/50 prose-code:px-1 prose-code:rounded prose-code:text-xs",
-                "prose-strong:font-bold",
-                m.role === 'bot' ? "prose-invert" : (chatTheme === 'light' ? "text-black prose-p:text-black prose-headings:text-black prose-strong:text-black prose-code:text-black prose-code:bg-black/10" : "text-white prose-invert")
-              )}>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    a: ({ href, children }) => (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 underline underline-offset-2 hover:text-blue-300 break-words"
-                      >
-                        {children}
-                      </a>
-                    )
-                  }}
-                >{m.text}</ReactMarkdown>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-        {isTyping && (
-          <div className="flex flex-col space-y-2 p-4">
-            <div className="flex items-center space-x-4">
-              <motion.div
-                animate={
-                  agentStatus === 'crud' ? { scale: [1, 1.15, 1] } :
-                    agentStatus === 'search' ? { rotate: 360 } :
-                      agentStatus === 'tools' ? { y: [0, -4, 0] } :
-                        { rotate: 360 }
-                }
-                transition={
-                  agentStatus === 'search' || agentStatus === 'thinking' || agentStatus === 'responding'
-                    ? { duration: 1.5, repeat: Infinity, ease: "linear" }
-                    : { duration: 0.8, repeat: Infinity, ease: "easeInOut" }
-                }
-                className={cn(
-                  "p-2 rounded-xl",
-                  chatTheme === 'light' ? "bg-zinc-100 border border-zinc-200 shadow-sm" : "bg-zinc-900 border border-zinc-800"
-                )}
-              >
-                {agentStatus === 'crud' && <Dumbbell className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-[#CCFF00]")} />}
-                {agentStatus === 'search' && <Search className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-blue-400")} />}
-                {agentStatus === 'tools' && <Timer className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-orange-400")} />}
-                {(agentStatus === 'thinking' || agentStatus === 'responding') && <Brain className={cn("w-5 h-5", chatTheme === 'light' ? "text-zinc-600" : "text-[#CCFF00]")} />}
-              </motion.div>
-              <div className="space-y-1">
-                <div className="flex space-x-1">
-                  {[0, 0.2, 0.4].map((delay, i) => (
-                    <motion.div
-                      key={i}
-                      animate={{ opacity: [0.3, 1, 0.3] }}
-                      transition={{ repeat: Infinity, duration: 1, delay }}
-                      className={cn("w-1.5 h-1.5 rounded-full",
-                        agentStatus === 'search' ? "bg-blue-400" :
-                          agentStatus === 'tools' ? "bg-orange-400" :
-                            "bg-[#CCFF00]"
-                      )}
-                    />
-                  ))}
-                </div>
-                <div className={cn(
-                  "text-[10px] font-mono uppercase tracking-widest",
-                  agentStatus === 'search' ? "text-blue-400 opacity-80" :
-                    agentStatus === 'tools' ? "text-orange-400 opacity-80" :
-                      "opacity-50"
-                )}>
-                  {agentStatus === 'thinking' && `Coach thinking... ${responseTimer}s`}
-                  {agentStatus === 'crud' && `Fetching your data... ${responseTimer}s`}
-                  {agentStatus === 'search' && `Searching the web... ${responseTimer}s`}
-                  {agentStatus === 'tools' && `Executing... ${responseTimer}s`}
-                  {agentStatus === 'responding' && `Preparing response... ${responseTimer}s`}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="fixed bottom-20 left-0 right-0 px-4 pb-2 z-50" style={{ background: chatTheme === 'light' ? 'white' : 'black' }}>
-        <div className="relative flex items-center max-w-2xl mx-auto shadow-2xl">
-          <input
-            type="text"
-            placeholder="Plan a leg day split..."
-            className={cn(
-              "w-full rounded-2xl py-4 pl-4 pr-28 focus:outline-none transition-all border",
-              chatTheme === 'light'
-                ? "bg-white border-zinc-200 text-black focus:border-[#CCFF00]"
-                : "bg-[#1A1A1A] border-zinc-800 text-white focus:border-[#CCFF00]"
-            )}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && askAI()}
-          />
-          <div className="absolute right-3 flex items-center space-x-1">
-            <button
-              onClick={toggleListening}
-              className={cn(
-                "p-2 rounded-lg transition-all duration-300",
-                isRecording
-                  ? "bg-red-500 text-white shadow-lg shadow-red-500/40 scale-110 animate-pulse"
-                  : (chatTheme === 'light' ? "text-zinc-400 hover:text-black" : "text-zinc-500 hover:text-white")
-              )}
-            >
-              <Mic className={cn("w-5 h-5", isRecording && "animate-bounce")} />
-            </button>
-            <button
-              onClick={askAI}
-              disabled={!prompt.trim() || isTyping}
-              className="p-2 bg-[#CCFF00] text-black rounded-xl disabled:opacity-50 shadow-lg shadow-[#CCFF00]/10 hover:scale-105 active:scale-95 transition-all"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [demoMode, setDemoMode] = useState(sessionStorage.getItem('fitai_sample_mode') === 'true');
+  const [appError, setAppError] = useState('');
+  const [user, setUser] = useState<User | null>(() => demoMode ? demoUser as User : null);
+  const [profile, setProfile] = useState<UserProfile | null>(() => demoMode ? readDemo().profile : null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(sessionStorage.getItem('google_sheets_token'));
 
   useEffect(() => {
@@ -3785,14 +1729,14 @@ export default function App() {
     };
     verifyToken();
   }, [googleAccessToken]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dash' | 'ai' | 'routines' | 'profile'>('dash');
+  const [loading, setLoading] = useState(!demoMode);
+  const [activeTab, setActiveTab] = useState<'dash' | 'ai' | 'routines' | 'profile'>('routines');
   const [isLogging, setIsLogging] = useState(false);
   const [editingRoutine, setEditingRoutine] = useState<Routine | null | 'new'>(null);
   const [activeRoutine, setActiveRoutine] = useState<Routine | null>(null);
   const [activeWorkoutSession, setActiveWorkoutSession] = useState<ActiveWorkoutSession | null>(null);
-  const [workouts, setWorkouts] = useState<WorkoutLog[]>([]);
-  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [workouts, setWorkouts] = useState<WorkoutLog[]>(() => demoMode ? readDemo().workouts : []);
+  const [routines, setRoutines] = useState<Routine[]>(() => demoMode ? readDemo().routines : []);
 
   // Back button + floating workout bubble state
   const [isWorkoutMinimized, setIsWorkoutMinimized] = useState(false);
@@ -3872,9 +1816,11 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (demoMode) return;
     testFirestoreConnection();
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
+      try {
       if (u) {
         const profileRef = doc(db, 'users', u.uid);
         const snap = await getDoc(profileRef);
@@ -3891,8 +1837,7 @@ export default function App() {
           await setDoc(profileRef, newProfile);
           setProfile(newProfile as UserProfile);
         }
-        fetchWorkouts(u.uid);
-        fetchRoutines(u.uid);
+        await Promise.all([fetchWorkouts(u.uid), fetchRoutines(u.uid)]);
         const restoredWorkout = loadActiveWorkoutSession(u.uid);
         if (restoredWorkout) {
           setActiveWorkoutSession(restoredWorkout);
@@ -3901,13 +1846,15 @@ export default function App() {
           setIsWorkoutMinimized(true);
           setWorkoutStartTime(restoredWorkout.startTime);
         }
-      }
-      setLoading(false);
+      } else { setProfile(null); setWorkouts([]); setRoutines([]); }
+      } catch { setAppError('Your saved data could not load. Check your connection and reload.'); }
+      finally { setLoading(false); }
     });
     return unsubscribe;
-  }, []);
+  }, [demoMode]);
 
   const fetchWorkouts = async (uid: string) => {
+    if (demoMode) { setWorkouts(readDemo().workouts); return; }
     const q = query(
       collection(db, 'workouts'),
       where('userId', '==', uid),
@@ -3919,6 +1866,7 @@ export default function App() {
   };
 
   const fetchRoutines = async (uid: string) => {
+    if (demoMode) { setRoutines(readDemo().routines); return; }
     const q = query(
       collection(db, 'routines'),
       where('userId', '==', uid),
@@ -3931,14 +1879,14 @@ export default function App() {
   const saveRoutine = async (data: Partial<Routine>) => {
     if (!user) return;
     try {
+      if (demoMode) { saveDemoRoutine(data, editingRoutine && editingRoutine !== 'new' ? editingRoutine.id : undefined); setRoutines(readDemo().routines); setEditingRoutine(null); return; }
       if (editingRoutine && editingRoutine !== 'new' && editingRoutine.id) {
         // Update existing
-        await setDoc(doc(db, 'routines', editingRoutine.id), {
+        await updateDoc(doc(db, 'routines', editingRoutine.id), {
           ...data,
           userId: user.uid,
           updatedAt: serverTimestamp(),
-          createdAt: editingRoutine.createdAt // Keep original
-        }, { merge: true });
+        });
       } else {
         // Create new
         await addDoc(collection(db, 'routines'), {
@@ -3948,21 +1896,20 @@ export default function App() {
         });
       }
       setEditingRoutine(null);
-      fetchRoutines(user.uid);
+      try { await fetchRoutines(user.uid); } catch { setAppError('Your routine was saved, but the library could not refresh. Reload to see it.'); }
     } catch (e) {
-      console.error(e);
+      throw e;
     }
   };
 
   const deleteRoutine = async (id: string) => {
-    if (!user) return;
+    if (!user || !window.confirm('Delete this routine? Your completed workout history will be kept.')) return;
+    if (demoMode) { deleteDemoRoutine(id); setRoutines(readDemo().routines); return; }
     try {
-      console.log('Attempting to delete routine:', id);
       await deleteDoc(doc(db, 'routines', id));
-      console.log('Successfully deleted routine:', id);
-      fetchRoutines(user.uid);
+      try { await fetchRoutines(user.uid); } catch { setAppError('The routine was deleted, but the library could not refresh. Reload to see the latest data.'); }
     } catch (e) {
-      console.error('Error deleting routine:', e);
+      setAppError('The routine could not be deleted. Check your connection and retry.');
     }
   };
 
@@ -3972,6 +1919,7 @@ export default function App() {
   };
 
   const connectGoogleSheets = async () => {
+    if (demoMode) { setAppError('Google Sheets is available after you sign in with a real account. The sample workspace stays local.'); return null; }
     const provider = new GoogleAuthProvider();
     provider.addScope('https://www.googleapis.com/auth/spreadsheets');
     // Ensure we always prompt for account if needed
@@ -3999,6 +1947,7 @@ export default function App() {
   };
 
   const createGoogleSheet = async (token: string) => {
+    if (demoMode) return null;
     try {
       const response = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
         method: 'POST',
@@ -4058,99 +2007,20 @@ export default function App() {
   };
 
   const signOutUser = async () => {
-    await signOut(auth);
+    if (demoMode) { sessionStorage.removeItem('fitai_sample_mode'); setDemoMode(false); setUser(null); setWorkouts([]); setRoutines([]); }
+    else await signOut(auth);
     setProfile(null);
     setActiveWorkoutSession(null);
   };
 
-  const updateProfile = async (data: Partial<UserProfile>) => {
-    if (!user) return;
+  const updateProfile = async (data: Partial<UserProfile>, proposal?: CoachProposal) => {
+    if (!user) throw new Error('Sign in before saving profile changes.');
+    if (demoMode) { updateDemoProfile(data); setProfile(readDemo().profile); return; }
     try {
       const profileRef = doc(db, 'users', user.uid);
-      await setDoc(profileRef, data, { merge: true });
+      if (proposal) await applyGoalProposal(user.uid, proposal, data);
+      else await setDoc(profileRef, data, { merge: true });
       setProfile(prev => prev ? { ...prev, ...data } : null);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const aiCreateRoutine = async (data: any) => {
-    if (!user) return;
-    try {
-      const docRef = await addDoc(collection(db, 'routines'), {
-        ...data,
-        userId: user.uid,
-        createdAt: serverTimestamp()
-      });
-      fetchRoutines(user.uid);
-      return { id: docRef.id, success: true };
-    } catch (e) {
-      console.error(e);
-      throw e;
-    }
-  };
-
-  const aiUpdateRoutine = async (id: string, data: any) => {
-    if (!user) return;
-    try {
-      // Remove id from data to avoid saving it as a field
-      const { id: _, ...updateData } = data;
-      await setDoc(doc(db, 'routines', id), {
-        ...updateData,
-        userId: user.uid,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-      fetchRoutines(user.uid);
-      return { success: true };
-    } catch (e) {
-      console.error(e);
-      throw e;
-    }
-  };
-
-  const aiDeleteRoutine = async (id: string) => {
-    if (!user) return;
-    try {
-      const routineDoc = await getDoc(doc(db, 'routines', id));
-      if (!routineDoc.exists()) {
-        return { success: false, error: 'Routine not found' };
-      }
-      if (routineDoc.data().userId !== user.uid) {
-        throw new Error("You can only delete your own routines");
-      }
-      await deleteDoc(doc(db, 'routines', id));
-      fetchRoutines(user.uid);
-      return { success: true };
-    } catch (e) {
-      console.error(e);
-      throw e;
-    }
-  };
-
-  const aiListRoutines = async () => {
-    if (!user) return [];
-    try {
-      const q = query(collection(db, 'routines'), where('userId', '==', user.uid));
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    } catch (e) {
-      console.error(e);
-      throw e;
-    }
-  };
-
-  const aiGetRoutine = async (id: string) => {
-    if (!user) return null;
-    try {
-      const routineDoc = await getDoc(doc(db, 'routines', id));
-      if (!routineDoc.exists()) {
-        return { error: 'Routine not found' };
-      }
-      const data = routineDoc.data();
-      if (data.userId !== user.uid) {
-        return { error: 'You can only access your own routines' };
-      }
-      return { id: routineDoc.id, ...data };
     } catch (e) {
       console.error(e);
       throw e;
@@ -4199,6 +2069,7 @@ export default function App() {
     user,
     profile,
     loading,
+    demo: demoMode,
     signIn,
     signOutUser,
     sheets: sheetsContextValue,
@@ -4207,7 +2078,7 @@ export default function App() {
 
   if (!user) return (
     <AuthContext.Provider value={contextValue}>
-      <LoginScreen />
+      <LoginScreen onExplore={() => { sessionStorage.setItem('fitai_sample_mode', 'true'); const data = readDemo(); setDemoMode(true); setUser(demoUser as User); setProfile(data.profile); setWorkouts(data.workouts); setRoutines(data.routines); setLoading(false); setAppError(''); }} />
     </AuthContext.Provider>
   );
 
@@ -4244,8 +2115,10 @@ export default function App() {
 
         {/* Normal tab content: shown when not logging OR when minimized */}
         {(!isLogging || isWorkoutMinimized) && (
-          <div className="min-h-screen bg-[#0A0A0A] text-white">
-            <main className={cn("h-[calc(100vh-5rem)]", activeTab === 'ai' ? 'overflow-hidden' : 'overflow-y-auto pb-20')}>
+          <div className="app-shell text-white">
+            <header className="workspace-topbar"><a href="/" className="brand"><span className="brand-mark"><Dumbbell className="w-5 h-5" /></span>fitai<span className="brand-dot">.</span></a><div className="flex items-center gap-3"><span className="workspace-badge">{demoMode ? 'Sample workspace · local only' : 'Your training workspace'}</span><span className="workspace-user">{(profile?.displayName || profile?.name || 'You').slice(0, 1)}</span></div></header>
+            {appError && <div className="workspace-alert inline-error" role="alert">{appError}<button onClick={() => setAppError('')} aria-label="Dismiss notification">×</button></div>}
+            <main className={cn("workspace-main", activeTab === 'ai' ? 'coach-main' : 'training-main')}>
               <AnimatePresence mode="wait">
                 <motion.div
                   key={activeTab}
@@ -4253,21 +2126,12 @@ export default function App() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
                   transition={{ duration: 0.2 }}
-                  className={activeTab === 'ai' ? 'h-full' : 'p-6'}
+                  className={activeTab === 'ai' ? 'h-full' : 'training-content'}
                 >
-                  {activeTab === 'dash' && <Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} />}
+                  {activeTab === 'dash' && <React.Suspense fallback={<p className="text-zinc-400 py-8" role="status">Loading your progress…</p>}><Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} /></React.Suspense>}
                   {activeTab === 'ai' && (
-                    <AIAssistant
-                      workouts={workouts}
-                      profile={profile}
-                      routines={routines}
-                      onCreateRoutine={aiCreateRoutine}
-                      onUpdateRoutine={aiUpdateRoutine}
-                      onDeleteRoutine={aiDeleteRoutine}
-                      onListRoutines={aiListRoutines}
-                      onGetRoutine={aiGetRoutine}
-                      onUpdateProfile={updateProfile}
-                    />
+                    <React.Suspense fallback={<p className="text-zinc-400 p-8" role="status">Opening your coach…</p>}><Coach user={user} preview={demoMode} workouts={workouts} profile={profile} routines={routines}
+                      onDataChanged={async () => { await Promise.all([fetchWorkouts(user.uid), fetchRoutines(user.uid)]); if (demoMode) setProfile(readDemo().profile); else { const snap = await getDoc(doc(db, 'users', user.uid)); if (snap.exists()) setProfile(snap.data() as UserProfile); } }} /></React.Suspense>
                   )}
                   {activeTab === 'routines' && (
                     <RoutinesManager
@@ -4292,19 +2156,21 @@ export default function App() {
               </AnimatePresence>
             </main>
 
-            <nav className="fixed bottom-0 left-0 right-0 bg-[#0A0A0A]/80 backdrop-blur-xl border-t border-zinc-800 px-6 py-4 pb-8 flex items-center justify-between z-40">
+            <nav className="workspace-nav" aria-label="Main navigation">
+              <div className="sidebar-heading"><span className="eyebrow">Your space</span><p>Make every session count.</p></div>
               {[
-                { id: 'dash', icon: History, label: 'Stats' },
-                { id: 'routines', icon: Library, label: 'Library' },
+                { id: 'routines', icon: Library, label: 'Workouts' },
                 { id: 'ai', icon: Brain, label: 'Coach' },
-                { id: 'profile', icon: UserIcon, label: 'Me' },
+                { id: 'dash', icon: History, label: 'Progress' },
+                { id: 'profile', icon: UserIcon, label: 'Profile' },
               ].map((tab) => (
                 <button
                   key={tab.id}
+                  aria-current={activeTab === tab.id ? 'page' : undefined}
                   onClick={() => setActiveTab(tab.id as any)}
                   className={cn(
-                    "flex flex-col items-center space-y-1 transition-all flex-1 relative",
-                    activeTab === tab.id ? "text-[#CCFF00]" : "text-zinc-500"
+                    "workspace-nav-item",
+                    activeTab === tab.id ? "text-[#C6F36B]" : "text-zinc-500"
                   )}
                 >
                   {/* Floating workout bubble — above the Me icon */}
@@ -4320,10 +2186,10 @@ export default function App() {
                         <motion.div
                           animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0, 0.5] }}
                           transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                          className="absolute inset-0 rounded-full bg-[#CCFF00]/30"
+                          className="absolute inset-0 rounded-full bg-[#C6F36B]/30"
                         />
                         {/* Bubble body */}
-                        <div className="w-12 h-12 rounded-full bg-[#CCFF00] flex items-center justify-center shadow-lg shadow-[#CCFF00]/30 border-2 border-[#CCFF00]/50">
+                        <div className="w-12 h-12 rounded-full bg-[#C6F36B] flex items-center justify-center shadow-lg shadow-[#C6F36B]/30 border-2 border-[#C6F36B]/50">
                           <div className="text-center">
                             <Dumbbell className="w-4 h-4 text-black mx-auto" />
                             <span className="text-[7px] font-mono font-bold text-black leading-none">
@@ -4334,10 +2200,11 @@ export default function App() {
                       </div>
                     </motion.div>
                   )}
-                  <tab.icon className={cn("w-6 h-6", activeTab === tab.id && "fill-current")} />
-                  <span className="text-[10px] font-mono uppercase tracking-widest">{tab.label}</span>
+                  <tab.icon className="w-5 h-5" />
+                  <span>{tab.label}</span>
                 </button>
               ))}
+              <div className="sidebar-note"><Sparkles className="w-5 h-5 text-[#C6F36B]" /><p>A plan is a starting point.<br />You set the pace.</p><span>{demoMode ? 'Sample data, real interactions.' : 'Small steps. Lasting progress.'}</span></div>
             </nav>
           </div>
         )}

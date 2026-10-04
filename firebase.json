@@ -1,4 +1,20 @@
 {
+  "functions": [
+    {
+      "source": "firebase-api",
+      "codebase": "fitai-api",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" ci --include=dev",
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ],
   "hosting": {
     "public": "dist",
     "ignore": [
@@ -7,6 +23,13 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      {
+        "source": "/api/**",
+        "function": {
+          "functionId": "fitaiApi",
+          "region": "us-central1"
+        }
+      },
       {
         "source": "**",
         "destination": "/index.html"

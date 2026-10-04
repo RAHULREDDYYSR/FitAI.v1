@@ -4,11 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "tsx watch server.ts",
+    "start": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "eval:agents": "node --import tsx scripts/eval-agents.ts",
+    "deploy:firebase": "npm run lint && npm test && npm run build && npx --yes firebase-tools@latest deploy --only functions:fitai-api,hosting"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

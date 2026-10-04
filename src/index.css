@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -7,7 +6,7 @@
 }
 
 body {
-  @apply bg-[#0A0A0A] text-white antialiased selection:bg-[#CCFF00] selection:text-black;
+  @apply bg-[#0b1211] text-white antialiased selection:bg-[#C6F36B] selection:text-black;
 }
 
 .markdown-body {
