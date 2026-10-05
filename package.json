@@ -12,7 +12,10 @@
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "eval:agents": "node --import tsx scripts/eval-agents.ts",
-    "deploy:firebase": "npm run lint && npm test && npm run build && npx --yes firebase-tools@latest deploy --only functions:fitai-api,hosting"
+    "deploy:firebase": "npm run lint && npm test && npm run build && npx --yes firebase-tools@latest deploy --only functions:fitai-api,hosting",
+    "build:supabase": "node scripts/build-supabase.mjs",
+    "deploy:supabase": "npm run lint && npm test && npm run build:supabase && npx --yes supabase@latest functions deploy fitai-api --use-api",
+    "deploy:hosting": "node scripts/check-coach-url.mjs && npm run lint && npm test && npm run build && npx --yes firebase-tools@latest deploy --only hosting --config firebase.hosting-only.json"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -42,6 +45,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
+    "esbuild": "^0.27.7",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

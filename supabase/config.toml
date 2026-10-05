@@ -1,0 +1,7 @@
+project_id = "fitai"
+
+[functions.fitai-api]
+enabled = true
+# The function verifies Firebase ID tokens itself. Supabase JWTs are not used.
+verify_jwt = false
+entrypoint = "./functions/fitai-api/index.js"

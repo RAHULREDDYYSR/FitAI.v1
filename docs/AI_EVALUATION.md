@@ -27,6 +27,8 @@ The previous graph also made multiple routing/tool/synthesis calls, guessed work
 
 No application API credential was available during this change, so no real-model evaluations ran. Real signed-in Firebase reads/writes were also not exercised. Enable the server-only credential and network settings, then run the live suite and a signed-in create/edit/delete workflow to validate those integrations.
 
+The Supabase path adds Web Request/Response handler tests for CORS, Firebase authentication, streamed body limits, preview behavior, cancellation, quotas and error redaction. `tests/deno-edge-smoke.mjs` runs the actual generated function bundle in Deno with fixture Firebase signing keys and an OpenAI fixture response. This verifies the RSA verifier and real SDK request format in the edge runtime; it does not validate a remote Supabase project or actual model behavior.
+
 ## Practical limits
 
 General model-written coaching advice still needs human judgment; deterministic guardrails cover specific failure modes, not all possible factual errors. Common personal facts use deterministic renderers, and free-form answers to personal-history/statistics questions fall back to clarification. Source URLs and model completion claims are rejected. The API works from caller-supplied context, while the database transaction independently verifies ownership and the fresh saved state. Limits are process-local; a multi-instance production deployment should share rate/concurrency accounting through its gateway or datastore.

@@ -1,5 +1,5 @@
 {
-  "exclude": ["node_modules", "dist", "firebase-api", "functions"],
+  "exclude": ["node_modules", "dist", "firebase-api", "functions", "supabase/functions"],
   "compilerOptions": {
     "target": "ES2022",
     "experimentalDecorators": true,

@@ -2,6 +2,7 @@ import type { User } from 'firebase/auth';
 import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { db } from './firebase';
 import type { Routine, UserProfile, WorkoutLog } from '../types';
+import { coachEndpoint } from './coach-endpoint';
 import { chatRequestSchema, proposalSchema, profileSnapshot, routineSnapshot, type CoachRequest, type CoachResponse } from './coach-contract';
 
 export function coachContext(profile: UserProfile | null, routines: Routine[], workouts: WorkoutLog[]): CoachRequest['context'] {
@@ -26,10 +27,11 @@ export async function freshCoachContext(uid: string): Promise<CoachRequest['cont
 export async function requestCoach(user: User, preview: boolean, input: CoachRequest, signal?: AbortSignal): Promise<CoachResponse> {
   const body = chatRequestSchema.parse(input);
   const token = preview ? null : await user.getIdToken();
-  const response = await fetch(preview ? '/api/ai/preview/chat' : '/api/ai/chat', {
+  const response = await fetch(coachEndpoint(preview ? 'preview/chat' : 'chat'), {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body), signal: signal || AbortSignal.timeout(65000),
   });
+  if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The coach API is not connected. Check the deployment API URL. Nothing has changed.');
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'The coach is unavailable. Please retry.');
   if (typeof data.text !== 'string') throw new Error('The coach returned an invalid response. Nothing has changed.');

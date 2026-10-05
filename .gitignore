@@ -4,6 +4,8 @@ dist/
 firebase-api/lib/
 firebase-debug.log
 firebase-debug.*.log
+supabase/functions/fitai-api/index.js
+supabase/.temp/
 coverage/
 .DS_Store
 *.log

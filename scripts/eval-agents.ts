@@ -6,6 +6,7 @@ import { CoachError, runCoach, type DecisionProvider } from '../server/coach';
 import type { CoachRequest } from '../src/lib/coach-contract';
 
 dotenv.config({ path: '.env.local', quiet: true });
+dotenv.config({ quiet: true });
 const enabled = isAIConfigured();
 const base: CoachRequest = {
   message: '', history: [], pending: null,

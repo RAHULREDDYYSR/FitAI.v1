@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { db } from '../lib/firebase';
 import { coachContext, freshCoachContext, requestCoach } from '../lib/coach-api';
+import { coachEndpoint } from '../lib/coach-endpoint';
 import { applyCoachProposal } from '../lib/coach-store';
 import { applyDemoProposal } from '../lib/demo';
 import { proposalSchema, sameSnapshot, type CoachProposal, type CoachResponse } from '../lib/coach-contract';
@@ -85,7 +86,7 @@ export function Coach({ user, preview, profile, routines, workouts, onDataChange
 
   useEffect(() => {
     mounted.current = true;
-    fetch('/api/ai/status').then(r => r.ok ? r.json() : Promise.reject()).then(d => { if (mounted.current) setConfigured(Boolean(d.configured)); }).catch(() => { if (mounted.current) setConfigured(false); });
+    fetch(coachEndpoint('status')).then(r => r.ok ? r.json() : Promise.reject()).then(d => { if (mounted.current) setConfigured(Boolean(d.configured)); }).catch(() => { if (mounted.current) setConfigured(false); });
     return () => { mounted.current = false; request.current?.abort(); recognition.current?.abort(); };
   }, []);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(timer); }, []);

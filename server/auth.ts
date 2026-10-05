@@ -1,4 +1,5 @@
 import { createPublicKey, verify } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { CoachError } from './coach';
 
 type Keys = { keys: Array<JsonWebKey & { kid: string }> };

@@ -43,6 +43,8 @@ The browser smoke exercises desktop and mobile layouts, facts, a draft/edit/appl
 
 ## Production and integrations
 
+For a backend on Supabase's free plan, use [Supabase deployment instructions](docs/SUPABASE_DEPLOYMENT.md). This retains Firebase Auth and Firestore while moving only the coach API to an Edge Function. Build the frontend with the public `VITE_COACH_API_URL`, then use `npm run deploy:hosting` to publish Hosting alone. Google Cloud Functions and Secret Manager are not used by that path; OpenAI API usage remains separate.
+
 Build and run the Node server to retain the AI API:
 
 ```sh
