@@ -18,7 +18,7 @@ export const modelDecisionSchema = decisionSchema.extend({
   }).nullable(),
 });
 
-export const coachModel = () => serverEnv('FITAI_COACH_MODEL') || 'gpt-5-nano';
+export const coachModel = () => serverEnv('FITAI_COACH_MODEL') || 'gpt-6-luna';
 export const isAIConfigured = () => Boolean(serverEnv('FITAI_OPENAI_API_KEY') || serverEnv('OPENAI_API_KEY'));
 export const openAIProvider: DecisionProvider = async (request, repair, signal) => {
   const apiKey = serverEnv('FITAI_OPENAI_API_KEY') || serverEnv('OPENAI_API_KEY');
@@ -27,7 +27,8 @@ export const openAIProvider: DecisionProvider = async (request, repair, signal) 
   const client = new OpenAI({ apiKey, timeout: 30000, maxRetries: 0, fetch: globalThis.fetch });
   const response = await client.beta.chat.completions.parse({
     model,
-    ...(model.startsWith('gpt-5') || model.startsWith('o') ? { reasoning_effort: 'low' as const } : { temperature: 0.2 }),
+    // GPT-6 uses provider defaults until account-specific parameters are verified.
+    ...(model.startsWith('gpt-6') ? {} : model.startsWith('gpt-5') || model.startsWith('o') ? { reasoning_effort: 'low' as const } : { temperature: 0.2 }),
     max_completion_tokens: 6000,
     response_format: zodResponseFormat(modelDecisionSchema, 'coach_decision'),
     messages: [{ role: 'system', content: `You are FitAI, a supportive, concise fitness coach and workout editing agent.

@@ -4,6 +4,7 @@ import { Buffer } from 'node:buffer';
 
 function check(condition, message) { if (!condition) throw new Error(message); }
 
+Deno.env.delete('FITAI_COACH_MODEL');
 Deno.env.set('FITAI_OPENAI_API_KEY', 'fitai-local-runtime-test');
 Deno.env.set('FITAI_ALLOWED_ORIGINS', 'https://gen-lang-client-0375724084.web.app');
 const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -24,9 +25,11 @@ globalThis.fetch = async (input, options) => {
     modelCalls++;
     check(options.signal instanceof AbortSignal, 'SDK must propagate the request signal');
     const request = JSON.parse(options.body);
+    check(request.model === 'gpt-6-luna', 'SDK must request the Luna default');
+    check(!('temperature' in request) && !('reasoning_effort' in request), 'Luna must use provider defaults');
     check(request.response_format.type === 'json_schema', 'SDK must use structured outputs');
     return Response.json({
-      id: 'fixture-completion', object: 'chat.completion', created: now, model: 'gpt-5-nano',
+      id: 'fixture-completion', object: 'chat.completion', created: now, model: 'gpt-6-luna',
       choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null,
         content: JSON.stringify({ mode: 'answer', text: 'Warm up with easy movement and light practice sets.',
           targetId: null, routine: null, edit: null, profilePatch: null }) } }],

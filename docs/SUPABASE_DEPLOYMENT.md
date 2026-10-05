@@ -18,7 +18,7 @@ No database migration or Supabase database password is needed by this API.
 
 ## Set server credentials
 
-The existing root `.env` can contain `OPENAI_API_KEY`; the server also accepts `FITAI_OPENAI_API_KEY`. Both are server-only. Upload a file containing only the server variables you intend to store:
+The existing root `.env` can contain `OPENAI_API_KEY`; the server also accepts `FITAI_OPENAI_API_KEY`. Both are server-only. Set `FITAI_COACH_MODEL=gpt-6-luna` in that file too if you previously configured another model; the code defaults to Luna when no override is present. Upload a file containing only the server variables you intend to store:
 
 ```sh
 npx --yes supabase@latest secrets set --env-file .env --project-ref YOUR_PROJECT_REF

@@ -18,7 +18,7 @@ The Express server serves the app and `/api/ai/*` on port 3000. Development watc
 
 For real AI replies, securely configure `FITAI_OPENAI_API_KEY` for `api.openai.com` in cloud environment settings, or put it in an ignored `.env.local` on an unmanaged machine. Never commit it, prefix it with `VITE_`, or expose it through Vite configuration. A ChatGPT/Codex subscription does not provide an application API credential. `OPENAI_API_KEY` is also supported on unmanaged machines; managed cloud bindings should use the non-reserved `FITAI_OPENAI_API_KEY` name.
 
-`FITAI_COACH_MODEL` defaults to the low-cost `gpt-5-nano`. It can be changed server-side to a model supporting structured outputs. We do not rely on the internal model names available only to Codex agents. `NODE_USE_ENV_PROXY=1` lets Node's native fetch use the platform HTTPS proxy with TLS verification intact. On machines without a proxy, it is harmless.
+`FITAI_COACH_MODEL` defaults to `gpt-6-luna`, listed in OpenAI's official SDK model catalog. It can be changed server-side to a model supporting structured outputs. Your API account must have access to the selected model. Update any existing `FITAI_COACH_MODEL=gpt-5-nano` override in `.env`, `.env.local`, cloud settings, or Supabase secrets when switching; overrides take precedence over the code default. GPT-6 requests use the provider's default sampling/reasoning settings. `NODE_USE_ENV_PROXY=1` lets Node's native fetch use the platform HTTPS proxy with TLS verification intact. On machines without a proxy, it is harmless.
 
 ## How the coach works
 

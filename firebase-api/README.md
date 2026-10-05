@@ -19,7 +19,7 @@ Set the Functions secret interactively so its value is not written into the repo
 firebase functions:secrets:set FITAI_OPENAI_API_KEY
 ```
 
-The function uses the existing provider and defaults to `gpt-5-nano`. The secret is only bound to the function at runtime.
+The function uses the existing provider and defaults to `gpt-6-luna`. The secret is only bound to the function at runtime.
 
 ## Build and deploy
 
