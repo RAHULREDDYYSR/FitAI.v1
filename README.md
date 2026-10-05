@@ -7,9 +7,12 @@ A React training workspace with workout logging, saved routines, progress charts
 Use Node.js 24.5+ (the cloud environment has 24.19.0).
 
 ```sh
+git pull --ff-only origin main
 npm ci
-NODE_USE_ENV_PROXY=1 npm run dev
+npm run dev
 ```
+
+Keep your server key in the ignored root `.env` or `.env.local`. Set `VITE_COACH_API_URL` empty for local development so the browser uses the local backend. `npm run dev` works in Bash and Windows PowerShell.
 
 The Express server serves the app and `/api/ai/*` on port 3000. Development watches server code and uses Vite for frontend updates. Choose **Explore sample workspace** to try the interface without signing in. Sample data and changes stay in browser storage; sample responses do not call a model. Google sign-in uses the existing Firebase project in `firebase-applet-config.json`.
 
@@ -36,8 +39,13 @@ npm run lint             # TypeScript
 npm test                 # Deterministic regression and HTTP/auth tests
 npm run build            # Production frontend
 python3 tests/ui-smoke.py # Running server, Python Playwright, /usr/bin/chromium
+python3 tests/ui-regression.py # Manual workflows, touch controls and six screen sizes
+python3 tests/dialog-smoke.py # Nested Escape, focus trap/restoration and small dialogs
+python3 tests/progress-smoke.py # Matrix date filtering and body-weight validation
 NODE_USE_ENV_PROXY=1 npm run eval:agents # Four actual model evals; needs API credential
 ```
+
+The manual UI regression checks canceled edits, routine creation/deletion, live set logging, profile validation and reload persistence, timer identity after reordering, dialog focus and mobile touch layouts from 320×568 through 1920×1080.
 
 The browser smoke exercises desktop and mobile layouts, facts, a draft/edit/apply sequence, negative approval, preservation of untouched exercises, discard, goal previews and reload persistence in the sample workspace. It performs no real-account database writes. The optional live suite verifies that each case actually calls the model and fails on upstream/auth/network errors; cases skipped for missing credentials are not passes. See [AI evaluation notes](docs/AI_EVALUATION.md).
 
@@ -51,6 +59,8 @@ Build and run the Node server to retain the AI API:
 npm run build
 NODE_ENV=production NODE_USE_ENV_PROXY=1 npm start
 ```
+
+For PowerShell, set `$env:NODE_ENV="production"` before `npm start`.
 
 Firebase Hosting serves the frontend and forwards `/api/**` to the second-generation `fitaiApi` function in `us-central1`. The separate `firebase-api/` codebase bundles the same API used by the local server; the older `functions/` tracing codebase is preserved. Deployment requires a Firebase login with access to the configured project, the Blaze plan, and a Secret Manager value named `FITAI_OPENAI_API_KEY`. A cloud workspace secret does not automatically create the production Functions secret.
 

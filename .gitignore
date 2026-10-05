@@ -11,3 +11,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Browser verification artifacts
+tests/artifacts/
+tests/__pycache__/

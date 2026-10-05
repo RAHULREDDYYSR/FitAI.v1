@@ -25,7 +25,7 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
       <div className="p-5 space-y-4">
         <div className="flex items-start justify-between">
           <div>
-            <div className="text-lg font-bold tracking-tight">{workout.name}</div>
+            <button type="button" aria-expanded={isExpanded} aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${workout.name} workout details`} onClick={event => { event.stopPropagation(); setIsExpanded(!isExpanded); }} className="text-lg font-bold tracking-tight text-left">{workout.name}</button>
             <div className="text-xs text-zinc-500 font-mono italic">
               {format(new Date(workout.date.seconds * 1000), 'EEEE, MMMM d')}
             </div>
@@ -119,10 +119,13 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
   );
 };
 
-const Dashboard = ({ workouts, profile, onUpdateProfile }: {
+const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true, loadingMore = false, onLoadMore }: {
   workouts: WorkoutLog[],
   profile: UserProfile | null,
-  onUpdateProfile: (data: Partial<UserProfile>) => Promise<any>
+  onUpdateProfile: (data: Partial<UserProfile>) => Promise<any>,
+  historyComplete?: boolean,
+  loadingMore?: boolean,
+  onLoadMore?: () => Promise<void>
 }) => {
   const [view, setView] = useState<'chart' | 'matrix'>('chart');
   const [showTimeMatrix, setShowTimeMatrix] = useState(false);
@@ -130,6 +133,17 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
   const [newWeight, setNewWeight] = useState('');
   const [isAddingWeight, setIsAddingWeight] = useState(false);
+  const [weightError, setWeightError] = useState('');
+  const [historyError, setHistoryError] = useState('');
+  const parsedWeight = newWeight.trim() ? Number(newWeight) : NaN;
+  const validWeight = Number.isFinite(parsedWeight) && parsedWeight >= 20 && parsedWeight <= 500;
+
+  const loadMoreHistory = async () => {
+    if (!onLoadMore || loadingMore) return;
+    setHistoryError('');
+    try { await onLoadMore(); }
+    catch { setHistoryError('Older sessions could not load. Check your connection and retry.'); }
+  };
 
   const weightData = useMemo(() => {
     if (!profile?.weightHistory) return [];
@@ -138,12 +152,12 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
     return profile.weightHistory.filter(wh => {
       const date = new Date(wh.date);
       if (filterType === 'all') return true;
-      if (filterType === 'week') return isAfter(date, startOfWeek(now));
-      if (filterType === 'month') return isAfter(date, startOfMonth(now));
-      if (filterType === 'year') return isAfter(date, startOfYear(now));
+      if (filterType === 'week') return date >= startOfWeek(now);
+      if (filterType === 'month') return date >= startOfMonth(now);
+      if (filterType === 'year') return date >= startOfYear(now);
       if (filterType === 'custom') {
-        const start = customRange.start ? new Date(customRange.start) : new Date(0);
-        const end = customRange.end ? new Date(customRange.end) : new Date();
+        const start = customRange.start ? new Date(`${customRange.start}T00:00:00`) : new Date(0);
+        const end = customRange.end ? new Date(`${customRange.end}T00:00:00`) : new Date();
         end.setHours(23, 59, 59, 999);
         return date >= start && date <= end;
       }
@@ -155,10 +169,11 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
   }, [profile?.weightHistory, filterType, customRange]);
 
   const handleAddWeight = async () => {
-    if (!newWeight || isNaN(parseFloat(newWeight))) return;
+    if (!validWeight || isAddingWeight) return;
     setIsAddingWeight(true);
+    setWeightError('');
     try {
-      const weight = parseFloat(newWeight);
+      const weight = parsedWeight;
       const today = new Date().toISOString();
       const newHistory = [...(profile?.weightHistory || []), { date: today, weight }];
       await onUpdateProfile({
@@ -166,6 +181,8 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
         weightHistory: newHistory
       });
       setNewWeight('');
+    } catch {
+      setWeightError('Your weight could not be saved. Check your connection and retry.');
     } finally {
       setIsAddingWeight(false);
     }
@@ -177,12 +194,12 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
       const workoutDate = new Date(w.date.seconds * 1000);
 
       if (filterType === 'all') return true;
-      if (filterType === 'week') return isAfter(workoutDate, startOfWeek(now));
-      if (filterType === 'month') return isAfter(workoutDate, startOfMonth(now));
-      if (filterType === 'year') return isAfter(workoutDate, startOfYear(now));
+      if (filterType === 'week') return workoutDate >= startOfWeek(now);
+      if (filterType === 'month') return workoutDate >= startOfMonth(now);
+      if (filterType === 'year') return workoutDate >= startOfYear(now);
       if (filterType === 'custom') {
-        const start = customRange.start ? new Date(customRange.start) : new Date(0);
-        const end = customRange.end ? new Date(customRange.end) : new Date();
+        const start = customRange.start ? new Date(`${customRange.start}T00:00:00`) : new Date(0);
+        const end = customRange.end ? new Date(`${customRange.end}T00:00:00`) : new Date();
         end.setHours(23, 59, 59, 999);
         return workoutDate >= start && workoutDate <= end;
       }
@@ -290,13 +307,15 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
           <div className="flex items-center space-x-2 mt-1">
             <button
               onClick={() => setView('chart')}
-              className={cn("text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded", view === 'chart' ? "bg-[#C6F36B] text-black" : "text-zinc-500")}
+              aria-pressed={view === 'chart'}
+              className={cn("min-h-11 min-w-11 text-[10px] font-mono uppercase tracking-widest px-3 py-2 rounded-xl", view === 'chart' ? "bg-[#C6F36B] text-black" : "text-zinc-500")}
             >
               Chart
             </button>
             <button
               onClick={() => setView('matrix')}
-              className={cn("text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded", view === 'matrix' ? "bg-[#C6F36B] text-black" : "text-zinc-500")}
+              aria-pressed={view === 'matrix'}
+              className={cn("min-h-11 min-w-11 text-[10px] font-mono uppercase tracking-widest px-3 py-2 rounded-xl", view === 'matrix' ? "bg-[#C6F36B] text-black" : "text-zinc-500")}
             >
               Matrix
             </button>
@@ -306,8 +325,9 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
           {view === 'matrix' && (
             <button
               onClick={() => setShowTimeMatrix(!showTimeMatrix)}
+              aria-pressed={showTimeMatrix}
               className={cn(
-                "px-3 py-1 rounded-full text-[10px] font-bold transition-all border",
+                "min-h-11 px-3 py-2 rounded-full text-[10px] font-bold transition-all border",
                 showTimeMatrix ? "bg-[#C6F36B] border-[#C6F36B] text-black" : "bg-zinc-900 border-zinc-800 text-zinc-500"
               )}
             >
@@ -320,27 +340,36 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
         </div>
       </header>
 
-      <div className="bg-[#131d1b] p-4 rounded-2xl border border-zinc-800 space-y-4">
+      {!historyComplete && <section className="bg-[#17211f] p-4 rounded-2xl border border-[#C6F36B]/25 space-y-3" aria-label="Workout history status">
+        <p className="text-sm text-zinc-300">Showing {workouts.length} loaded sessions. Date filters and charts cover this loaded history; older sessions have not loaded yet.</p>
+        {historyError && <p className="inline-error" role="alert">{historyError}</p>}
+        {onLoadMore && <button type="button" className="secondary-button min-h-11 w-full sm:w-auto" onClick={loadMoreHistory} disabled={loadingMore}>
+          {loadingMore ? 'Loading older sessions…' : 'Load older sessions'}
+        </button>}
+      </section>}
+
+      <div className="bg-[#131d1b] p-4 rounded-2xl border border-zinc-800 space-y-4 min-w-0">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center space-x-1 bg-black/30 p-1 rounded-xl">
+          <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl max-w-full overflow-x-auto">
             {(['all', 'week', 'month', 'year', 'custom'] as const).map((type) => (
               <button
                 key={type}
                 onClick={() => setFilterType(type)}
+                aria-pressed={filterType === type}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all",
+                  "shrink-0 min-h-11 px-3 py-2 rounded-lg text-[10px] font-bold uppercase transition-all",
                   filterType === type
                     ? "bg-[#C6F36B] text-black"
                     : "text-zinc-500 hover:text-zinc-300"
                 )}
               >
-                {type}
+                {type === 'all' && !historyComplete ? 'All loaded' : type}
               </button>
             ))}
           </div>
           <div className="flex items-center space-x-2 text-[10px] text-zinc-500 font-mono uppercase shrink-0">
             <span className="w-2 h-2 rounded-full bg-[#C6F36B] animate-pulse" />
-            <span>{filteredWorkouts.length} Results</span>
+            <span>{filteredWorkouts.length} {historyComplete ? 'results' : 'loaded results'}</span>
           </div>
         </div>
 
@@ -348,24 +377,26 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
-            className="flex items-center space-x-2 pt-2 border-t border-zinc-800"
+            className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800"
           >
             <div className="flex-1">
-              <label className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">Start</label>
+              <label htmlFor="progress-date-start" className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">Start</label>
               <input
+                id="progress-date-start"
                 type="date"
                 value={customRange.start}
                 onChange={(e) => setCustomRange(prev => ({ ...prev, start: e.target.value }))}
-                className="w-full bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
+                className="w-full min-w-0 bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
               />
             </div>
             <div className="flex-1">
-              <label className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">End</label>
+              <label htmlFor="progress-date-end" className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">End</label>
               <input
+                id="progress-date-end"
                 type="date"
                 value={customRange.end}
                 onChange={(e) => setCustomRange(prev => ({ ...prev, end: e.target.value }))}
-                className="w-full bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
+                className="w-full min-w-0 bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
               />
             </div>
           </motion.div>
@@ -397,29 +428,40 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
           </div>
 
           <div className="bg-[#131d1b] rounded-2xl p-4 border border-zinc-800 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center space-x-2">
                 <span className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">Body Weight</span>
                 <span className="text-xl font-bold">{profile?.weight || '-'} <span className="text-[10px] text-zinc-500">kg</span></span>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2 ml-auto max-w-full">
+                <label htmlFor="progress-todays-weight" className="sr-only">Today's body weight in kilograms</label>
                 <input
+                  id="progress-todays-weight"
                   type="number"
+                  min={20}
+                  max={500}
+                  aria-invalid={Boolean(newWeight && !validWeight)}
+                  aria-describedby={newWeight && !validWeight ? 'progress-weight-range' : weightError ? 'progress-weight-error' : undefined}
+                  inputMode="decimal"
                   placeholder="Today's kg"
                   value={newWeight}
-                  onChange={(e) => setNewWeight(e.target.value)}
-                  className="w-20 bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
+                  onChange={(e) => { setNewWeight(e.target.value); setWeightError(''); }}
+                  className="w-[100px] min-w-0 bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
                   step="0.1"
                 />
                 <button
+                  type="button"
+                  aria-label="Save today's body weight"
                   onClick={handleAddWeight}
-                  disabled={isAddingWeight || !newWeight}
-                  className="p-2 bg-[#C6F36B] text-black rounded-lg disabled:opacity-50"
+                  disabled={isAddingWeight || !validWeight}
+                  className="min-h-11 min-w-11 grid place-items-center bg-[#C6F36B] text-black rounded-lg disabled:opacity-50"
                 >
-                  <Plus className="w-4 h-4" />
+                  {isAddingWeight ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 </button>
               </div>
             </div>
+            {newWeight && !validWeight && <p id="progress-weight-range" className="text-xs text-amber-200" role="status">Enter a weight from 20 to 500 kg.</p>}
+            {weightError && <p id="progress-weight-error" className="inline-error" role="alert">{weightError}</p>}
 
             <div className="h-[180px]">
               {weightData.length > 0 ? (
@@ -464,11 +506,11 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/50">
-                {workouts.slice(0, 10).map((w, i) => {
+                {filteredWorkouts.slice(0, 10).map((w, i) => {
                   const totalActiveTime = getTimedOnlyActiveTime(w);
                   const totalVolume = getWorkoutVolume(w);
                   return (
-                    <tr key={i} className="hover:bg-white/5 transition-colors">
+                    <tr key={w.id || `${w.date.seconds}-${i}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-3 font-bold">{format(new Date(w.date.seconds * 1000), 'MMM d')}</td>
                       <td className="p-3 text-[#C6F36B] font-bold">{totalVolume}kg</td>
                       {showTimeMatrix && <td className="p-3 text-zinc-400">{Math.floor(w.duration / 60)}m</td>}
@@ -477,6 +519,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
                     </tr>
                   );
                 })}
+                {filteredWorkouts.length === 0 && <tr><td colSpan={showTimeMatrix ? 5 : 2} className="p-6 text-center text-zinc-500">No sessions match this date range.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -506,7 +549,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile }: {
 
       <div className="grid grid-cols-2 gap-4">
         {[
-          { label: 'Total Logs', value: filteredWorkouts.length, icon: History },
+          { label: historyComplete ? 'Total Logs' : 'Loaded Sessions', value: historyComplete ? filteredWorkouts.length : workouts.length, icon: History },
           { label: 'Avg Volume', value: Math.round(filteredWorkouts.reduce((acc, curr) => acc + getWorkoutVolume(curr), 0) / (filteredWorkouts.length || 1)), icon: Dumbbell },
         ].map((stat, i) => (
           <div key={i} className="bg-[#131d1b] p-4 rounded-2xl border border-zinc-800">

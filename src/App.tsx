@@ -35,6 +35,8 @@ import {
   addMonths,
   startOfMonth,
   endOfMonth,
+  endOfWeek,
+  isSameMonth,
   eachDayOfInterval,
   isSameDay,
   isAfter,
@@ -62,7 +64,9 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
-  onSnapshot
+  onSnapshot,
+  startAfter,
+  type QueryDocumentSnapshot
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType, testFirestoreConnection } from './lib/firebase';
 import { cn } from './lib/utils';
@@ -73,95 +77,13 @@ import { applyGoalProposal } from './lib/coach-store';
 import type { CoachProposal } from './lib/coach-contract';
 import { DEMO_UID, demoUser, readDemo, updateDemoProfile, saveDemoRoutine, deleteDemoRoutine, saveDemoWorkout } from './lib/demo';
 import { safeNumber, getSetVolume, getWorkoutVolume, getWorkoutIntensity, getTimedOnlyActiveTime, formatSetPerformance } from './lib/workout-metrics';
+import { createActiveWorkoutSession, saveActiveWorkoutSession, loadActiveWorkoutSession, clearActiveWorkoutSession, setTimerKey, type ActiveWorkoutExercise, type ActiveWorkoutSession } from './lib/active-workout';
+import { validateManualRoutine, validateManualProfile, validateWorkout } from './lib/manual-validation';
+import { useDialog } from './lib/use-dialog';
 
 
 const Coach = React.lazy(() => import('./components/Coach').then(module => ({ default: module.Coach })));
 const Dashboard = React.lazy(() => import('./components/Progress').then(module => ({ default: module.Dashboard })));
-
-type ActiveWorkoutExercise = WorkoutExercise & {
-  sessionKey?: string;
-};
-
-type ActiveWorkoutSession = {
-  userId: string;
-  routineId?: string;
-  name: string;
-  exercises: ActiveWorkoutExercise[];
-  startTime: number;
-  setStartTimes: Record<string, number>;
-  savedAt: number;
-  expiresAt: number;
-};
-
-const ACTIVE_WORKOUT_TTL_MS = 2 * 60 * 60 * 1000;
-
-const activeWorkoutStorageKey = (userId: string) => `fitai_active_workout_${userId}`;
-
-const createActiveWorkoutSession = (userId: string, routine?: Routine | null): ActiveWorkoutSession => {
-  const startTime = Date.now();
-  return {
-    userId,
-    routineId: routine?.id,
-    name: routine?.name || 'Morning Session',
-    exercises: routine?.exercises.map(exercise => ({
-      ...exercise,
-      sessionKey: Math.random().toString(36).slice(2, 11),
-      sets: exercise.sets.map(set => ({
-        ...set,
-        weight: safeNumber(set.weight),
-        reps: safeNumber(set.reps),
-        timeTaken: safeNumber(set.timeTaken),
-        completed: false
-      }))
-    })) || [],
-    startTime,
-    setStartTimes: {},
-    savedAt: startTime,
-    expiresAt: startTime + ACTIVE_WORKOUT_TTL_MS
-  };
-};
-
-const saveActiveWorkoutSession = (session: ActiveWorkoutSession) => {
-  localStorage.setItem(activeWorkoutStorageKey(session.userId), JSON.stringify({
-    ...session,
-    savedAt: Date.now(),
-    expiresAt: Date.now() + ACTIVE_WORKOUT_TTL_MS
-  }));
-};
-
-const loadActiveWorkoutSession = (userId: string): ActiveWorkoutSession | null => {
-  try {
-    const raw = localStorage.getItem(activeWorkoutStorageKey(userId));
-    if (!raw) return null;
-    const session = JSON.parse(raw) as ActiveWorkoutSession;
-    if (session.userId !== userId || safeNumber(session.expiresAt) < Date.now()) {
-      localStorage.removeItem(activeWorkoutStorageKey(userId));
-      return null;
-    }
-    return {
-      ...session,
-      exercises: (session.exercises || []).map(exercise => ({
-        ...exercise,
-        sessionKey: exercise.sessionKey || Math.random().toString(36).slice(2, 11),
-        sets: (exercise.sets || []).map(set => ({
-          ...set,
-          weight: safeNumber(set.weight),
-          reps: safeNumber(set.reps),
-          timeTaken: safeNumber(set.timeTaken),
-          completed: Boolean(set.completed)
-        }))
-      })),
-      setStartTimes: session.setStartTimes || {}
-    };
-  } catch {
-    localStorage.removeItem(activeWorkoutStorageKey(userId));
-    return null;
-  }
-};
-
-const clearActiveWorkoutSession = (userId: string) => {
-  localStorage.removeItem(activeWorkoutStorageKey(userId));
-};
 
 // --- Context & State ---
 const AuthContext = createContext<{
@@ -225,10 +147,16 @@ const LoginScreen = ({ onExplore }: { onExplore: () => void }) => {
 
 // --- Sub-screens ---
 
-const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISES[0]) => void, onCancel: () => void }) => {
+const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISES[0]) => void | Promise<void>, onCancel: () => void }) => {
   const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
+  const [error, setError] = useState('');
   const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<string[]>([]);
   const [selectedEquipmentList, setSelectedEquipmentList] = useState<string[]>([]);
+  const requestCancel = () => { if (!saveLock.current) onCancel(); };
+  const dialogRef = useDialog<HTMLDivElement>(requestCancel);
+  const trimmedName = name.trim();
 
   const allMuscleGroups = Array.from(new Set(EXERCISES.flatMap(e => e.muscle_groups))).sort();
   const allEquipmentItems = Array.from(new Set(EXERCISES.flatMap(e => e.equipment_list))).sort();
@@ -251,39 +179,48 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       className="fixed inset-0 z-[70] bg-black flex flex-col sm:inset-4 sm:rounded-3xl sm:border sm:border-zinc-800"
+      role="dialog" aria-modal="true" aria-labelledby="custom-exercise-title" tabIndex={-1} ref={dialogRef}
     >
       <header className="flex items-center justify-between p-4 border-b border-zinc-900">
-        <button onClick={onCancel} className="p-2 text-zinc-400">
+        <button onClick={requestCancel} disabled={saving} aria-label="Cancel adding exercise" className="p-2 text-zinc-400">
           <ChevronLeft className="w-6 h-6" />
         </button>
-        <h2 className="text-lg font-bold">New Exercise</h2>
+        <h2 id="custom-exercise-title" className="text-lg font-bold">New Exercise</h2>
         <button
-          onClick={() => {
-            if (name && selectedMuscleGroups.length > 0 && selectedEquipmentList.length > 0) {
-              onSave({
+          onClick={async () => {
+            if (saveLock.current || !trimmedName || selectedMuscleGroups.length === 0 || selectedEquipmentList.length === 0) return;
+            saveLock.current = true;
+            setSaving(true); setError('');
+            try {
+              await onSave({
                 id: `custom-${Date.now()}`,
-                name,
+                name: trimmedName,
                 muscle: selectedMuscleGroups[0],
                 muscle_groups: selectedMuscleGroups,
                 category: 'Custom',
                 equipment: selectedEquipmentList[0],
                 equipment_list: selectedEquipmentList
               });
-            }
+            } catch (e: unknown) {
+              setError(e instanceof Error ? e.message : 'Exercise could not be saved. Try again.');
+            } finally { saveLock.current = false; setSaving(false); }
           }}
-          disabled={!name || selectedMuscleGroups.length === 0 || selectedEquipmentList.length === 0}
+          disabled={saving || !trimmedName || selectedMuscleGroups.length === 0 || selectedEquipmentList.length === 0}
           className="bg-[#C6F36B] text-black px-4 py-1.5 rounded-full text-xs font-bold disabled:opacity-50"
         >
-          Save
+          {saving ? 'Saving…' : 'Save'}
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar p-6 space-y-8">
+      <div className="flex-1 overflow-y-auto no-scrollbar p-4 sm:p-6 space-y-8">
         <div className="space-y-2">
           <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Exercise Name</label>
           <input
             type="text"
             value={name}
+            maxLength={150}
+            aria-label="Exercise name"
+            disabled={saving}
             onChange={e => setName(e.target.value)}
             placeholder="e.g. Incline Machine Press"
             className="w-full bg-[#131d1b] border-none rounded-2xl p-4 text-white placeholder:text-zinc-700 focus:ring-1 focus:ring-[#C6F36B] outline-none text-lg font-bold"
@@ -291,12 +228,17 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
           />
         </div>
 
+        {error && <p className="inline-error" role="alert">{error}</p>}
+
         <div className="space-y-2">
           <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Muscle Groups (Select all that apply)</label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2">
             {allMuscleGroups.map(m => (
               <button
                 key={m}
+                type="button"
+                aria-pressed={selectedMuscleGroups.includes(m)}
+                disabled={saving}
                 onClick={() => toggleMuscle(m)}
                 className={cn(
                   "p-3 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all text-left flex items-center justify-between",
@@ -312,10 +254,13 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
 
         <div className="space-y-2">
           <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Equipment (Select all that apply)</label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2">
             {allEquipmentItems.map(e => (
               <button
                 key={e}
+                type="button"
+                aria-pressed={selectedEquipmentList.includes(e)}
+                disabled={saving}
                 onClick={() => toggleEquipment(e)}
                 className={cn(
                   "p-3 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all text-left flex items-center justify-between",
@@ -333,15 +278,22 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
   );
 };
 
-const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit, onEditModeChange }: { profile: UserProfile | null, workouts: WorkoutLog[], onUpdate: (data: Partial<UserProfile>, proposal?: CoachProposal) => Promise<void>, onSignOut: () => void, forceExitEdit?: number, onEditModeChange?: (editing: boolean) => void }) => {
+const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, forceExitEdit, onEditModeChange, historyComplete = true }: { historyComplete?: boolean, profile: UserProfile | null, workouts: WorkoutLog[], onUpdate: (data: Partial<UserProfile>, proposal?: CoachProposal) => Promise<void>, onSignOut: () => void, forceExitEdit?: number, onEditModeChange?: (editing: boolean) => void }) => {
   const { sheets, user, demo } = useAuth();
   const [suggestedGoal, setSuggestedGoal] = useState<{ key: "shortTermGoal" | "longTermGoal"; value: string; proposal?: CoachProposal } | null>(null);
   const [goalError, setGoalError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<Partial<UserProfile>>({});
+  const [profileError, setProfileError] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [applyingGoal, setApplyingGoal] = useState(false);
+  const profile = savedProfile ? { ...savedProfile, ...(isEditing ? draft : {}) } : null;
+  const changeProfile = (patch: Partial<UserProfile>) => { setDraft(current => ({ ...current, ...patch })); setProfileError(''); };
+  const cancelProfileEdit = () => { setDraft({}); setProfileError(''); setIsEditing(false); };
 
   // Exit edit mode when parent triggers back button
   useEffect(() => {
-    if (forceExitEdit && forceExitEdit > 0) setIsEditing(false);
+    if (forceExitEdit && forceExitEdit > 0 && !savingProfile) cancelProfileEdit();
   }, [forceExitEdit]);
 
   // Notify parent of edit mode changes
@@ -351,6 +303,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
   const [isRefiningShort, setIsRefiningShort] = useState(false);
   const [isRefiningLong, setIsRefiningLong] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const calendarDialogRef = useDialog<HTMLDivElement>(() => setShowCalendar(false), showCalendar);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [isCreatingSheet, setIsCreatingSheet] = useState(false);
 
@@ -366,34 +319,43 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
   const workoutDays = workouts.map(w => format(new Date(w.date.seconds * 1000), 'yyyy-MM-dd'));
 
   const getDaysInMonth = (date: Date) => {
-    const start = startOfMonth(date);
-    const end = endOfMonth(date);
+    const start = startOfWeek(startOfMonth(date));
+    const end = endOfWeek(endOfMonth(date));
     return eachDayOfInterval({ start, end });
   };
 
   const days = getDaysInMonth(currentMonth);
 
   return (
-    <div className="space-y-8 pb-24">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <div className="w-16 h-16 bg-[#C6F36B] rounded-full flex items-center justify-center text-black font-bold text-2xl uppercase">
+    <div className="profile-section space-y-8 pb-24">
+      <header className="profile-header flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="profile-avatar w-16 h-16 shrink-0 bg-[#C6F36B] rounded-full flex items-center justify-center text-black font-bold text-2xl uppercase">
             {(profile?.name || profile?.displayName || 'You')[0]}
           </div>
-          <div>
-            <h2 className="text-2xl font-bold">{profile?.name || profile?.displayName || 'Your profile'}</h2>
-            <p className="text-zinc-500 text-xs font-mono lowercase">{profile?.email}</p>
+          <div className="min-w-0">
+            <h2 className="text-2xl font-bold break-words">{profile?.name || profile?.displayName || 'Your profile'}</h2>
+            <p className="text-zinc-500 text-xs font-mono lowercase break-all">{profile?.email}</p>
           </div>
         </div>
         <div className="flex space-x-2">
           <button
             onClick={() => setShowCalendar(true)}
+            aria-label="Open workout calendar"
             className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl hover:border-[#C6F36B]/50 transition-colors"
           >
             <Calendar className="w-5 h-5 text-[#C6F36B]" />
           </button>
           <button
-            onClick={() => setIsEditing(!isEditing)}
+            disabled={savingProfile || applyingGoal || !savedProfile}
+            aria-label={isEditing ? 'Save profile' : 'Edit profile'}
+            onClick={async () => {
+              if (!isEditing) { setDraft({}); setProfileError(''); setIsEditing(true); return; }
+              setSavingProfile(true); setProfileError('');
+              try { const patch = validateManualProfile(draft); if (Object.keys(patch).length) await onUpdate(patch); setIsEditing(false); setDraft({}); }
+              catch (e: any) { setProfileError(e.message || 'Your profile could not be saved. Your edits are still here.'); }
+              finally { setSavingProfile(false); }
+            }}
             className={cn(
               "p-2 rounded-xl border transition-all flex items-center space-x-1.5",
               isEditing
@@ -405,7 +367,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             {isEditing ? (
               <>
                 <Check className="w-4 h-4 stroke-[2.5]" />
-                <span className="text-xs font-mono uppercase tracking-wider pr-1">Save</span>
+                <span className="text-xs font-mono uppercase tracking-wider pr-1">{savingProfile ? 'Saving…' : 'Save'}</span>
               </>
             ) : (
               <>
@@ -417,8 +379,11 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
         </div>
       </header>
 
+      {isEditing && <button className="secondary-button" aria-label="Cancel profile edit" onClick={cancelProfileEdit} disabled={savingProfile}>Cancel edits</button>}
+      {profileError && <p className="inline-error" role="alert">{profileError}</p>}
+
       {goalError && <p className="inline-error" role="alert">{goalError}</p>}
-      {suggestedGoal && <section className="change-preview"><p className="eyebrow text-[#C6F36B]">{demo ? 'Sample suggestion' : 'Review before saving'}</p><h3 className="text-lg font-semibold mt-2">Suggested goal</h3><p className="mt-3">{suggestedGoal.value}</p><div className="flex gap-3 mt-4"><button className="primary-button" onClick={async () => { try { await onUpdate({ [suggestedGoal.key]: suggestedGoal.value }, suggestedGoal.proposal); setSuggestedGoal(null); setGoalError(''); } catch (e: any) { setGoalError(e.message || 'Your goal could not be saved. Try again.'); } }}>Apply goal</button><button className="secondary-button" onClick={() => setSuggestedGoal(null)}>Discard</button></div></section>}
+      {suggestedGoal && <section className="change-preview"><p className="eyebrow text-[#C6F36B]">{demo ? 'Sample suggestion' : 'Review before saving'}</p><h3 className="text-lg font-semibold mt-2">Suggested goal</h3><p className="mt-3">{suggestedGoal.value}</p><div className="flex flex-wrap gap-3 mt-4"><button className="primary-button" disabled={applyingGoal || isEditing} onClick={async () => { setApplyingGoal(true); try { await onUpdate({ [suggestedGoal.key]: suggestedGoal.value }, suggestedGoal.proposal); setSuggestedGoal(null); setGoalError(''); } catch (e: any) { setGoalError(e.message || 'Your goal could not be saved. Try again.'); } finally { setApplyingGoal(false); } }}>{applyingGoal ? 'Saving…' : 'Apply goal'}</button><button className="secondary-button" disabled={applyingGoal} onClick={() => setSuggestedGoal(null)}>Discard</button></div></section>}
       {/* Goal & Measurements */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-[#131d1b] p-6 rounded-3xl border border-zinc-800 space-y-5">
@@ -437,7 +402,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                 Short-term <span className="normal-case text-zinc-700 font-normal">(next few months)</span>
               </p>
               <button
-                disabled={isRefiningShort}
+                disabled={isEditing || isRefiningShort || isRefiningLong || applyingGoal}
                 onClick={async () => {
                   const aim = profile?.aim || profile?.shortTermGoal || '';
                   if (!aim) { alert("Add your aim or short-term goal first."); return; }
@@ -467,9 +432,10 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             {isEditing ? (
               <input
                 className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#C6F36B]/50 outline-none transition-colors text-sm"
+                aria-label="Short-term goal" maxLength={500} disabled={savingProfile}
                 value={profile?.shortTermGoal || ''}
                 placeholder="e.g. Gain 5kg lean muscle by August"
-                onChange={(e) => onUpdate({ shortTermGoal: e.target.value })}
+                onChange={(e) => changeProfile({ shortTermGoal: e.target.value })}
               />
             ) : (
               <p className="text-lg font-bold">{profile?.shortTermGoal || <span className="text-zinc-600 font-normal italic text-sm">No short-term goal set yet</span>}</p>
@@ -483,7 +449,7 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                 Long-term <span className="normal-case text-zinc-700 font-normal">(1 year+)</span>
               </p>
               <button
-                disabled={isRefiningLong}
+                disabled={isEditing || isRefiningShort || isRefiningLong || applyingGoal}
                 onClick={async () => {
                   const aim = profile?.aim || profile?.longTermGoal || '';
                   if (!aim) { alert("Add your aim or long-term goal first."); return; }
@@ -513,9 +479,10 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             {isEditing ? (
               <input
                 className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#C6F36B]/50 outline-none transition-colors text-sm"
+                aria-label="Long-term goal" maxLength={500} disabled={savingProfile}
                 value={profile?.longTermGoal || ''}
                 placeholder="e.g. Compete in Men's Physique by 2026"
-                onChange={(e) => onUpdate({ longTermGoal: e.target.value })}
+                onChange={(e) => changeProfile({ longTermGoal: e.target.value })}
               />
             ) : (
               <p className="text-base font-semibold text-zinc-200">{profile?.longTermGoal || <span className="text-zinc-600 font-normal italic text-sm">No long-term goal set yet</span>}</p>
@@ -528,9 +495,10 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             {isEditing ? (
               <textarea
                 className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white text-xs resize-none h-20 focus:border-[#C6F36B]/50 outline-none transition-colors"
+                aria-label="Detailed aim" maxLength={2000} disabled={savingProfile}
                 value={profile?.aim || ''}
                 placeholder="Describe what you want to achieve, your motivation, and your ultimate vision..."
-                onChange={(e) => onUpdate({ aim: e.target.value })}
+                onChange={(e) => changeProfile({ aim: e.target.value })}
               />
             ) : (
               <p className="text-sm text-zinc-400 italic">"{profile?.aim || 'Describe your vision here...'}"</p>
@@ -554,18 +522,19 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                   m.type === 'select' ? (
                     <select
                       className="bg-zinc-900 border border-zinc-800 px-2 py-1 rounded w-full text-white font-bold"
+                      aria-label={m.label} disabled={savingProfile}
                       value={profile?.[m.key as keyof UserProfile] || ''}
-                      onChange={(e) => onUpdate({ [m.key]: e.target.value })}
+                      onChange={(e) => changeProfile({ [m.key]: e.target.value })}
                     >
                       <option value="">Select</option>
                       {m.options?.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   ) : (
                     <input
-                      type="number"
+                      type="number" aria-label={m.unit ? `${m.label} (${m.unit})` : m.label} disabled={savingProfile}
                       className="bg-zinc-900 border border-zinc-800 px-2 py-1 rounded w-full text-white font-bold"
                       value={profile?.[m.key as keyof UserProfile] || ''}
-                      onChange={(e) => onUpdate({ [m.key]: parseFloat(e.target.value) })}
+                      onChange={(e) => changeProfile({ [m.key]: e.target.value === '' ? undefined : Number(e.target.value) })}
                     />
                   )
                 ) : (
@@ -639,18 +608,19 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-6"
+            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-6"
           >
-            <div className="bg-[#131d1b] w-full max-w-md rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl">
+            <div ref={calendarDialogRef} role="dialog" aria-modal="true" aria-labelledby="workout-calendar-title" tabIndex={-1} className="bg-[#131d1b] w-full max-w-md max-h-[95dvh] overflow-y-auto rounded-3xl border border-zinc-800 shadow-2xl">
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-                <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}><ChevronLeft /></button>
-                <h3 className="font-bold">{format(currentMonth, 'MMMM yyyy')}</h3>
-                <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}><ChevronRight /></button>
+                <button aria-label="Previous month" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}><ChevronLeft /></button>
+                <h3 id="workout-calendar-title" className="font-bold">Workout calendar, {format(currentMonth, 'MMMM yyyy')}</h3>
+                <button aria-label="Next month" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}><ChevronRight /></button>
               </div>
-              <div className="p-6">
+              <div className="p-3 sm:p-6">
+                {!historyComplete && <p className="text-xs text-zinc-400 mb-4">This calendar shows loaded sessions. Load older sessions in Progress to include earlier history.</p>}
                 <div className="grid grid-cols-7 gap-2 mb-4">
-                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-                    <div key={i} className="text-center text-[10px] text-zinc-600 font-bold">{d}</div>
+                  {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => (
+                    <div key={i} aria-label={d} className="text-center text-[10px] text-zinc-600 font-bold">{d[0]}</div>
                   ))}
                   {days.map((day, i) => {
                     const dateStr = format(day, 'yyyy-MM-dd');
@@ -662,7 +632,8 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                         key={i}
                         className={cn(
                           "aspect-square flex flex-col items-center justify-center rounded-xl relative",
-                          isToday && "ring-1 ring-[#C6F36B]"
+                          isToday && "ring-1 ring-[#C6F36B]",
+                          !isSameMonth(day, currentMonth) && 'opacity-30'
                         )}
                       >
                         <span className="text-[10px] text-zinc-500 mb-1">{format(day, 'd')}</span>
@@ -675,8 +646,9 @@ const ProfileSection = ({ profile, workouts, onUpdate, onSignOut, forceExitEdit,
                     );
                   })}
                 </div>
-                <button
-                  onClick={() => setShowCalendar(false)}
+              <button
+                onClick={() => setShowCalendar(false)}
+                aria-label="Close workout calendar"
                   className="w-full bg-[#C6F36B] text-black font-bold py-3 rounded-2xl mt-4"
                 >
                   Close
@@ -787,6 +759,9 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'equip' | 'muscle' | null>(null);
   const [showCustomModal, setShowCustomModal] = useState(false);
+  const selectorDialogRef = useDialog<HTMLDivElement>(onCancel);
+  const filterDialogRef = useDialog<HTMLDivElement>(() => setActiveFilter(null), !!activeFilter);
+  const [savingCustom, setSavingCustom] = useState(false);
 
   const allExercises = useMemo(() => {
     return [...EXERCISES, ...(profile?.customExercises || [])];
@@ -841,26 +816,29 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
     return matchSearch && matchEquip && matchMuscle;
   }).sort((a, b) => a.name.localeCompare(b.name)), [allExercises, search, selectedEquip, selectedMuscle]);
 
-  const recentExercises = useMemo(() => allExercises.slice(0, 5), [allExercises]); // Mocking recent for now
+  const suggestedExercises = useMemo(() => allExercises.slice(0, 5), [allExercises]);
 
   const handleSaveCustom = async (exercise: typeof EXERCISES[0]) => {
+    if (savingCustom) return;
+    setSavingCustom(true);
     const currentCustom = profile?.customExercises || [];
-    await updateProfile({
-      customExercises: [...currentCustom, exercise]
-    });
-    setShowCustomModal(false);
-    onSelect(exercise);
+    try {
+      await updateProfile({ customExercises: [...currentCustom, exercise] });
+      setShowCustomModal(false);
+      onSelect(exercise);
+    } finally { setSavingCustom(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col overflow-hidden">
+    <div ref={selectorDialogRef} role="dialog" aria-modal="true" aria-labelledby="exercise-selector-title" tabIndex={-1} className="fixed inset-0 bg-black z-50 flex flex-col overflow-hidden">
       <header className="flex items-center justify-between p-4 border-b border-zinc-900">
-        <button onClick={onCancel} className="p-2 text-zinc-400">
+        <button onClick={onCancel} aria-label="Close exercise selector" className="p-2 text-zinc-400">
           <ChevronLeft className="w-6 h-6" />
         </button>
-        <h2 className="text-lg font-bold">Exercises</h2>
+        <h2 id="exercise-selector-title" className="text-lg font-bold">Exercises</h2>
         <button
           onClick={() => setShowCustomModal(true)}
+          aria-label="Add custom exercise"
           className="p-2 text-[#C6F36B]"
           title="Add Custom Exercise"
         >
@@ -871,8 +849,9 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
       <div className="p-4 space-y-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-          <input
-            type="text"
+            <input
+              type="text"
+              aria-label="Search exercises"
             placeholder="Search exercise"
             className="w-full bg-[#131d1b] border-none rounded-lg py-2.5 pl-10 pr-4 text-sm focus:ring-1 focus:ring-[#C6F36B]"
             value={search}
@@ -883,6 +862,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => setActiveFilter('equip')}
+            aria-label={`Filter by equipment: ${selectedEquip}`}
             className={cn(
               "py-2.5 rounded-md text-[10px] font-bold flex items-center justify-center space-x-1 border transition-all",
               selectedEquip !== "All Equipment" ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-300 border-zinc-800"
@@ -893,6 +873,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
           </button>
           <button
             onClick={() => setActiveFilter('muscle')}
+            aria-label={`Filter by muscle: ${selectedMuscle}`}
             className={cn(
               "py-2.5 rounded-md text-[10px] font-bold flex items-center justify-center space-x-1 border transition-all",
               selectedMuscle !== "All Muscles" ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-300 border-zinc-800"
@@ -916,9 +897,9 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
       <div className="flex-1 overflow-y-auto px-4 pb-20 no-scrollbar">
         {search === '' && selectedEquip === "All Equipment" && selectedMuscle === "All Muscles" && (
           <div className="mb-6">
-            <h3 className="text-zinc-500 text-xs font-bold mb-4 uppercase tracking-wider">Recent Exercises</h3>
+            <h3 className="text-zinc-500 text-xs font-bold mb-4 uppercase tracking-wider">Suggested exercises</h3>
             <div className="divide-y divide-zinc-900">
-              {recentExercises.map((e) => (
+              {suggestedExercises.map((e) => (
                 <button
                   key={`recent-${e.id}`}
                   onClick={() => onSelect(e)}
@@ -994,12 +975,14 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               className="bg-[#131d1b] w-full max-h-[70vh] rounded-t-[32px] border-t border-zinc-800 overflow-hidden flex flex-col shadow-2xl"
+              ref={filterDialogRef} role="dialog" aria-modal="true" aria-labelledby="exercise-filter-title" tabIndex={-1}
               onClick={e => e.stopPropagation()}
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-                <h3 className="text-lg font-bold">Select {activeFilter === 'equip' ? 'Equipment' : 'Muscle Group'}</h3>
+                <h3 id="exercise-filter-title" className="text-lg font-bold">Select {activeFilter === 'equip' ? 'Equipment' : 'Muscle Group'}</h3>
                 <button
                   onClick={() => setActiveFilter(null)}
+                  aria-label="Close filter options"
                   className="p-1 text-zinc-500 hover:text-white"
                 >
                   <ChevronDown className="w-6 h-6" />
@@ -1047,15 +1030,16 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   onSave: (r: Partial<Routine>) => Promise<void>,
   onCancel: () => void
 }) => {
-  const [exercises, setExercises] = useState<WorkoutExercise[]>(routine?.exercises || []);
+  const [exercises, setExercises] = useState<WorkoutExercise[]>(() => structuredClone(routine?.exercises || []));
   const [name, setName] = useState(routine?.name || 'New Routine');
   const [description, setDescription] = useState(routine?.description || '');
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
-  const [search, setSearch] = useState('');
+  const saveLock = useRef(false);
   const [saveError, setSaveError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const addExercise = (exercise: typeof EXERCISES[0]) => {
+    if (exercises.some(e => e.exerciseId === exercise.id)) { setShowExerciseSelector(false); setSaveError('This exercise is already in the routine. Add sets to it instead.'); return; }
     setExercises([...exercises, {
       exerciseId: exercise.id,
       name: exercise.name,
@@ -1065,15 +1049,11 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   };
 
   const addSet = (idx: number) => {
-    const newEx = [...exercises];
-    newEx[idx].sets.push({ reps: 0, weight: 0, completed: false });
-    setExercises(newEx);
+    setExercises(current => current.map((ex, i) => i === idx ? { ...ex, sets: [...ex.sets, { reps: 0, weight: 0, completed: false }] } : ex));
   };
 
   const updateSet = (exIdx: number, setIdx: number, field: keyof WorkoutSet, value: any) => {
-    const newEx = [...exercises];
-    newEx[exIdx].sets[setIdx] = { ...newEx[exIdx].sets[setIdx], [field]: value };
-    setExercises(newEx);
+    setExercises(current => current.map((ex, i) => i === exIdx ? { ...ex, sets: ex.sets.map((set, j) => j === setIdx ? { ...set, [field]: value } : set) } : ex));
   };
 
   if (showExerciseSelector) {
@@ -1081,13 +1061,13 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0b1211] p-6 pb-32">
+    <div className="routine-editor editor-screen flex flex-col min-h-screen bg-[#0b1211] p-6 pb-32">
       <header className="flex items-center justify-between mb-8">
-        <button onClick={onCancel} className="text-zinc-500 font-bold">Cancel</button>
+        <button disabled={isSaving} onClick={onCancel} className="text-zinc-500 font-bold">Cancel</button>
         <h2 className="text-lg font-bold">Edit Routine</h2>
         <button
           disabled={isSaving || !name.trim() || !exercises.length}
-          onClick={async () => { setIsSaving(true); setSaveError(''); try { await onSave({ name: name.trim(), description, exercises }); } catch { setSaveError('The routine could not be saved. Your edits are still here; check your connection and retry.'); } finally { setIsSaving(false); } }}
+          onClick={async () => { if (saveLock.current) return; setSaveError(''); let data; try { data = validateManualRoutine({ name, description, exercises }); } catch (error) { setSaveError(error.message); return; } saveLock.current = true; setIsSaving(true); try { await onSave(data as Partial<Routine>); } catch { setSaveError('The routine could not be saved. Your edits are still here; check your connection and retry.'); } finally { saveLock.current = false; setIsSaving(false); } }}
           className="text-[#C6F36B] font-bold"
         >
           {isSaving ? 'Saving…' : 'Save'}
@@ -1102,14 +1082,14 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
             value={name}
             onChange={e => setName(e.target.value)}
             className="w-full text-3xl font-bold bg-transparent border-none focus:ring-0 p-0 placeholder:text-zinc-800"
-            placeholder="Routine Name"
+            placeholder="Routine Name" aria-label="Routine name" maxLength={100} disabled={isSaving}
           />
           <input
             type="text"
             value={description}
             onChange={e => setDescription(e.target.value)}
             className="w-full text-sm text-zinc-500 bg-transparent border-none focus:ring-0 p-0 placeholder:text-zinc-800"
-            placeholder="Description (Optional)"
+            placeholder="Description (Optional)" aria-label="Routine description" maxLength={1000} disabled={isSaving}
           />
         </div>
 
@@ -1121,7 +1101,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                   <h3 className="text-lg font-bold text-[#C6F36B]">{ex.name}</h3>
                 </div>
                 <button
-                  onClick={() => setExercises(exercises.filter((_, i) => i !== exIdx))}
+                  aria-label={`Remove ${ex.name}`} disabled={isSaving} onClick={() => setExercises(exercises.filter((_, i) => i !== exIdx))}
                   className="text-zinc-700"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -1138,31 +1118,29 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                   <div key={sIdx} className="grid grid-cols-4 gap-4 bg-zinc-900/50 p-2 rounded-xl items-center">
                     <div className="text-center font-mono text-xs py-2">{sIdx + 1}</div>
                     <input
-                      type="number"
+                      type="number" min={0} max={1000} step="any" aria-label={`${ex.name} set ${sIdx + 1} weight (kg)`} disabled={isSaving}
                       value={set.weight || ''}
                       onChange={e => updateSet(exIdx, sIdx, 'weight', safeNumber(parseFloat(e.target.value)))}
                       className="bg-transparent border-none text-center focus:ring-0 font-bold"
                     />
                     <input
-                      type="number"
+                      type="number" min={0} max={100} step={1} aria-label={`${ex.name} set ${sIdx + 1} reps`} disabled={isSaving}
                       value={set.reps || ''}
-                      onChange={e => updateSet(exIdx, sIdx, 'reps', safeNumber(parseInt(e.target.value)))}
+                      onChange={e => updateSet(exIdx, sIdx, 'reps', safeNumber(parseFloat(e.target.value)))}
                       className="bg-transparent border-none text-center focus:ring-0 font-bold"
                     />
                     <button
                       onClick={() => {
-                        const newEx = [...exercises];
-                        newEx[exIdx].sets = newEx[exIdx].sets.filter((_, i) => i !== sIdx);
-                        setExercises(newEx);
+                        setExercises(current => current.map((exercise, i) => i === exIdx ? { ...exercise, sets: exercise.sets.filter((_, j) => j !== sIdx) } : exercise));
                       }}
-                      className="flex justify-center text-zinc-700 hover:text-red-500 transition-colors"
+                      disabled={isSaving || ex.sets.length === 1} aria-label={`Remove ${ex.name} set ${sIdx + 1}`} className="flex justify-center text-zinc-700 hover:text-red-500 transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 ))}
                 <button
-                  onClick={() => addSet(exIdx)}
+                  disabled={isSaving || ex.sets.length >= 20} onClick={() => addSet(exIdx)}
                   className="w-full py-2 border border-dashed border-zinc-800 rounded-xl text-[10px] text-zinc-600 font-mono uppercase tracking-widest"
                 >
                   Add Base Set
@@ -1172,7 +1150,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
           ))}
 
           <button
-            onClick={() => setShowExerciseSelector(true)}
+            disabled={isSaving || exercises.length >= 50} onClick={() => setShowExerciseSelector(true)}
             className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-white font-bold"
           >
             <Plus className="w-5 h-5 text-[#C6F36B]" />
@@ -1184,147 +1162,46 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   );
 };
 
-const ExerciseItem = ({
-  ex,
-  exIdx,
-  exercises,
-  setExercises,
-  getPrevPerformance,
-  updateSet,
-  toggleSetComplete,
-  startSetTimer,
-  formatTimeTaken,
-  parseTimeTaken,
-  setStartTimes,
-  addSet
-}: any) => {
+const ExerciseItem = ({ ex, exIdx, exercises, setExercises, getPrevPerformance, updateSet, toggleSetComplete,
+  startSetTimer, formatTimeTaken, parseTimeTaken, setStartTimes, addSet, now, disabled }: any) => {
   const dragControls = useDragControls();
-
+  const moveExercise = (direction: number) => {
+    const next = [...exercises];
+    const target = exIdx + direction;
+    if (target < 0 || target >= next.length) return;
+    [next[exIdx], next[target]] = [next[target], next[exIdx]];
+    setExercises(next);
+  };
   return (
-    <Reorder.Item
-      key={ex.sessionKey}
-      value={ex}
-      dragListener={false}
-      dragControls={dragControls}
-      className="space-y-4 bg-[#0b1211] select-none"
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div
-            onPointerDown={(e) => dragControls.start(e)}
-            className="cursor-grab active:cursor-grabbing p-2 opacity-50 hover:opacity-100 touch-none"
-          >
-            <div className="flex space-x-1">
-              <div className="w-1 h-4 bg-zinc-700 rounded-full" />
-              <div className="w-1 h-4 bg-zinc-700 rounded-full" />
-              <div className="w-1 h-4 bg-zinc-700 rounded-full" />
-            </div>
-          </div>
-          <h3 className="text-xl font-bold text-[#C6F36B]">{ex.name}</h3>
-        </div>
-        <button
-          onClick={() => setExercises(exercises.filter((_: any, i: number) => i !== exIdx))}
-          className="text-zinc-600 hover:text-red-500 transition-colors p-2"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+    <Reorder.Item value={ex} dragListener={false} dragControls={dragControls} className="space-y-4 bg-[#0b1211]">
+      <div className="exercise-heading">
+        <button disabled={disabled} aria-label={`Drag ${ex.name} to reorder`} onPointerDown={e => !disabled && dragControls.start(e)} className="cursor-grab touch-none p-2 text-zinc-400"><span aria-hidden="true">⠿</span></button>
+        <h3 className="text-lg font-bold text-[#C6F36B] flex-1 min-w-0 break-words">{ex.name}</h3>
+        <button disabled={disabled || exIdx === 0} aria-label={`Move ${ex.name} up`} onClick={() => moveExercise(-1)} className="exercise-action">↑</button>
+        <button disabled={disabled || exIdx === exercises.length - 1} aria-label={`Move ${ex.name} down`} onClick={() => moveExercise(1)} className="exercise-action">↓</button>
+        <button disabled={disabled} aria-label={`Remove ${ex.name}`} onClick={() => setExercises(exercises.filter((_: any, i: number) => i !== exIdx))} className="exercise-action"><Trash2 className="w-4 h-4" /></button>
       </div>
-
       <div className="space-y-2">
-        <div className="grid grid-cols-6 gap-2 px-2 text-[8px] font-mono text-zinc-600 uppercase tracking-widest">
-          <div className="text-center">Set</div>
-          <div className="text-center">Prev</div>
-          <div className="text-center">kg</div>
-          <div className="text-center">Reps</div>
-          <div className="text-center">Sec</div>
-          <div className="text-right pr-2">Done</div>
-        </div>
-
+        <div className="set-grid set-grid-heading text-[10px] uppercase text-zinc-400"><span>Set</span><span>kg</span><span>Reps</span><span>Time</span><span>Done</span></div>
         {ex.sets.map((set: any, sIdx: number) => {
-          const setKey = `${exIdx}-${sIdx}`;
-          const isTimerRunning = !!setStartTimes[setKey];
-
-          return (
-            <motion.div
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              key={sIdx}
-              className={cn(
-                "grid grid-cols-6 gap-2 items-center p-2 rounded-xl transition-all duration-300",
-                set.completed ? "bg-[#C6F36B]/10 border border-[#C6F36B]/30 shadow-inner" : "bg-zinc-900 border border-transparent"
-              )}
-            >
-              <div className="font-mono text-sm text-center bg-zinc-800 py-1 rounded-md">{sIdx + 1}</div>
-              <div className="text-center text-[9px] text-zinc-500 font-mono font-bold">{getPrevPerformance(ex.name, sIdx)}</div>
-              <input
-                type="number"
-                value={set.weight || ''}
-                placeholder="0"
-                onChange={(e) => updateSet(exIdx, sIdx, 'weight', safeNumber(parseFloat(e.target.value)))}
-                className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
-              />
-              <input
-                type="number"
-                value={set.reps || ''}
-                placeholder="0"
-                onChange={(e) => updateSet(exIdx, sIdx, 'reps', safeNumber(parseInt(e.target.value)))}
-                className="bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-bold w-full"
-              />
-              <div className="relative group">
-                <input
-                  type="text"
-                  value={formatTimeTaken(set.timeTaken)}
-                  placeholder="0:00"
-                  onChange={(e) => updateSet(exIdx, sIdx, 'timeTaken', parseTimeTaken(e.target.value))}
-                  className={cn(
-                    "bg-transparent border-none text-center focus:ring-0 p-0 text-sm font-mono w-full",
-                    isTimerRunning ? "text-[#C6F36B] animate-pulse" : ""
-                  )}
-                />
-                {!set.completed && !isTimerRunning && (
-                  <button
-                    onClick={() => startSetTimer(exIdx, sIdx)}
-                    className="absolute inset-0 bg-zinc-800/80 rounded opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                  >
-                    <Play className="w-3 h-3 text-[#C6F36B]" />
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center justify-end space-x-2 pr-1">
-                <button
-                  onClick={() => toggleSetComplete(exIdx, sIdx)}
-                  className={cn(
-                    "flex items-center justify-center p-1 rounded-lg transition-transform active:scale-90",
-                    set.completed ? "text-[#C6F36B]" : "text-zinc-700"
-                  )}
-                >
-                  {set.completed ? (
-                    <CheckCircle2 className="w-6 h-6 fill-current bg-black rounded-full" />
-                  ) : (
-                    <div className="w-6 h-6 rounded-md border-2 border-zinc-700" />
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    const newEx = [...exercises];
-                    newEx[exIdx].sets = newEx[exIdx].sets.filter((_: any, i: number) => i !== sIdx);
-                    setExercises(newEx);
-                  }}
-                  className="text-zinc-700 hover:text-red-500 transition-colors p-1"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </motion.div>
-          );
+          const key = setTimerKey(ex, set);
+          const running = Boolean(setStartTimes[key]);
+          const duration = safeNumber(set.timeTaken) + (running ? Math.max(0, Math.floor((now - setStartTimes[key]) / 1000)) : 0);
+          return <div key={set.sessionKey} className={cn('set-row rounded-xl border p-2', set.completed ? 'bg-[#C6F36B]/10 border-[#C6F36B]/30' : 'bg-zinc-900 border-zinc-800')}>
+            <div className="set-grid">
+              <span className="text-center text-sm">{sIdx + 1}</span>
+              <input disabled={disabled} type="number" min={0} max={1000} step="any" value={set.weight || ''} placeholder="0" aria-label={`${ex.name} set ${sIdx + 1} weight (kg)`} onChange={e => updateSet(exIdx, sIdx, 'weight', safeNumber(parseFloat(e.target.value)))} />
+              <input disabled={disabled} type="number" min={0} max={100} step={1} value={set.reps || ''} placeholder="0" aria-label={`${ex.name} set ${sIdx + 1} reps`} onChange={e => updateSet(exIdx, sIdx, 'reps', safeNumber(parseFloat(e.target.value)))} />
+              <input disabled={disabled || running} type="text" value={formatTimeTaken(duration)} placeholder="0:00" aria-label={`${ex.name} set ${sIdx + 1} time (minutes:seconds)`} onChange={e => updateSet(exIdx, sIdx, 'timeTaken', parseTimeTaken(e.target.value))} className={running ? 'text-[#C6F36B]' : ''} />
+              <button disabled={disabled} aria-label={`${set.completed ? 'Undo' : 'Complete'} ${ex.name} set ${sIdx + 1}`} aria-pressed={set.completed} onClick={() => toggleSetComplete(exIdx, sIdx)} className="set-complete">{set.completed ? <CheckCircle2 className="w-6 h-6 text-[#C6F36B]" /> : <span className="w-6 h-6 rounded-md border-2 border-zinc-500" />}</button>
+            </div>
+            <div className="set-detail"><span>Previous: {getPrevPerformance(ex.name, sIdx)}</span><div className="flex gap-2">
+              {!set.completed && <button disabled={disabled || running} onClick={() => startSetTimer(exIdx, sIdx)} aria-label={`Start ${ex.name} set ${sIdx + 1} timer`}>{running ? 'Timing…' : 'Start timer'}</button>}
+              <button disabled={disabled || ex.sets.length === 1} aria-label={`Remove ${ex.name} set ${sIdx + 1}`} onClick={() => setExercises(exercises.map((exercise: any, i: number) => i === exIdx ? { ...exercise, sets: exercise.sets.filter((_: any, j: number) => j !== sIdx) } : exercise))}><Trash2 className="w-4 h-4" /></button>
+            </div></div>
+          </div>;
         })}
-
-        <button
-          onClick={() => addSet(exIdx)}
-          className="w-full py-2 rounded-xl border border-zinc-800 text-zinc-500 font-mono text-xs uppercase tracking-widest hover:bg-zinc-900 transition-colors"
-        >
-          Add Set
-        </button>
+        <button disabled={disabled || ex.sets.length >= 30} onClick={() => addSet(exIdx)} className="w-full py-3 rounded-xl border border-zinc-800 text-zinc-400 text-xs">Add Set</button>
       </div>
     </Reorder.Item>
   );
@@ -1335,12 +1212,14 @@ const WorkoutLogger = ({
   workouts,
   initialSession,
   onComplete,
+  onMinimize,
   onCancel
 }: {
   routine?: Routine,
   workouts: WorkoutLog[],
   initialSession?: ActiveWorkoutSession | null,
   onComplete: () => void,
+  onMinimize?: () => void,
   onCancel: () => void
 }) => {
   const { user, profile, sheets } = useAuth();
@@ -1350,7 +1229,8 @@ const WorkoutLogger = ({
   );
   const [name, setName] = useState(initialSession?.name || routine?.name || 'Morning Session');
   const [startTime] = useState(initialSession?.startTime || Date.now());
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+  const saveLock = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [isComplete, setIsComplete] = useState(false);
@@ -1363,7 +1243,7 @@ const WorkoutLogger = ({
     // Search backwards through history
     for (const workout of workouts) {
       const ex = workout.exercises.find(e => e.name === exerciseName);
-      if (ex && ex.sets[setIdx]) {
+      if (ex && ex.sets[setIdx] && ex.sets[setIdx].completed !== false) {
         return formatSetPerformance(ex.sets[setIdx]);
       }
     }
@@ -1371,15 +1251,16 @@ const WorkoutLogger = ({
   };
 
   useEffect(() => {
+    if (isComplete) return;
     const timer = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTime) / 1000));
     }, 1000);
     return () => clearInterval(timer);
-  }, [startTime]);
+  }, [startTime, isComplete]);
 
   useEffect(() => {
     if (!currentUserId || currentUserId === 'anonymous' || isComplete) return;
-    saveActiveWorkoutSession({
+    try { saveActiveWorkoutSession({
       userId: currentUserId,
       routineId: initialSession?.routineId || routine?.id,
       name,
@@ -1387,8 +1268,8 @@ const WorkoutLogger = ({
       startTime,
       setStartTimes,
       savedAt: Date.now(),
-      expiresAt: Date.now() + ACTIVE_WORKOUT_TTL_MS
-    });
+      expiresAt: Date.now() + 2 * 60 * 60 * 1000
+    }); } catch { setSaveError('Your browser could not keep a recovery copy. Keep this tab open until you finish saving.'); }
   }, [currentUserId, exercises, initialSession?.routineId, isComplete, name, routine?.id, setStartTimes, startTime]);
 
   const formatTime = (seconds: number) => {
@@ -1399,58 +1280,35 @@ const WorkoutLogger = ({
 
   const addExercise = (exercise: typeof EXERCISES[0]) => {
     setExercises([...exercises, {
-      sessionKey: Math.random().toString(36).substr(2, 9),
+      sessionKey: crypto.randomUUID(),
       exerciseId: exercise.id,
       name: exercise.name,
-      sets: [{ reps: 0, weight: 0, completed: false }]
+      sets: [{ sessionKey: crypto.randomUUID(), reps: 0, weight: 0, completed: false }]
     }]);
     setShowExerciseSelector(false);
   };
 
   const addSet = (idx: number) => {
-    const newEx = [...exercises];
-    newEx[idx].sets.push({ reps: 0, weight: 0, completed: false });
-    setExercises(newEx);
+    setExercises(current => current.map((ex, i) => i === idx ? { ...ex, sets: [...ex.sets, { sessionKey: crypto.randomUUID(), reps: 0, weight: 0, completed: false }] } : ex));
   };
 
   const updateSet = (exIdx: number, setIdx: number, field: string, value: any) => {
-    const newEx = [...exercises];
     const normalizedValue = ['weight', 'reps', 'timeTaken'].includes(field) ? safeNumber(value) : value;
-    newEx[exIdx].sets[setIdx] = { ...newEx[exIdx].sets[setIdx], [field]: normalizedValue };
-    setExercises(newEx);
+    setExercises(current => current.map((ex, i) => i === exIdx ? { ...ex, sets: ex.sets.map((set, j) => j === setIdx ? { ...set, [field]: normalizedValue } : set) } : ex));
   };
 
   const toggleSetComplete = (exIdx: number, setIdx: number) => {
-    const newEx = [...exercises];
-    const set = newEx[exIdx].sets[setIdx];
-    const setKey = `${exIdx}-${setIdx}`;
-
-    if (!set.completed) {
-      // Completing the set
-      const startTimeRef = setStartTimes[setKey];
-      if (startTimeRef) {
-        const timeTaken = Math.floor((Date.now() - startTimeRef) / 1000);
-        set.timeTaken = safeNumber(set.timeTaken) + timeTaken;
-      }
-      set.completed = true;
-      // Clear start time
-      const nextStartTimes = { ...setStartTimes };
-      delete nextStartTimes[setKey];
-      setSetStartTimes(nextStartTimes);
-    } else {
-      // Uncompleting - potentially restart timer? 
-      // For now just toggle
-      set.completed = false;
-    }
-
-    setExercises(newEx);
+    const exercise = exercises[exIdx];
+    const set = exercise.sets[setIdx];
+    const key = setTimerKey(exercise, set);
+    const extraTime = !set.completed && setStartTimes[key] ? Math.max(0, Math.floor((Date.now() - setStartTimes[key]) / 1000)) : 0;
+    setExercises(current => current.map((ex, i) => i === exIdx ? { ...ex, sets: ex.sets.map((item, j) => j === setIdx ? { ...item, completed: !item.completed, timeTaken: safeNumber(item.timeTaken) + extraTime } : item) } : ex));
+    setSetStartTimes(current => { const next = { ...current }; delete next[key]; return next; });
   };
 
   const startSetTimer = (exIdx: number, setIdx: number) => {
-    const setKey = `${exIdx}-${setIdx}`;
-    if (!setStartTimes[setKey]) {
-      setSetStartTimes({ ...setStartTimes, [setKey]: Date.now() });
-    }
+    const key = setTimerKey(exercises[exIdx], exercises[exIdx].sets[setIdx]);
+    setSetStartTimes(current => current[key] ? current : { ...current, [key]: Date.now() });
   };
 
   const formatTimeTaken = (seconds: number | undefined): string => {
@@ -1474,14 +1332,15 @@ const WorkoutLogger = ({
   };
 
   const saveWorkout = async () => {
-    if (exercises.length === 0 || isSaving) return;
-    if (!exercises.some(ex => ex.sets.some(set => set.completed))) { setSaveError('Complete at least one set before finishing your workout.'); return; }
+    if (saveLock.current) return;
     setSaveError('');
+    try { validateWorkout(name, exercises); } catch (error) { setSaveError(error.message); return; }
+    saveLock.current = true;
     setIsSaving(true);
     const duration = Math.floor((Date.now() - startTime) / 1000);
     const sanitizedExercises = exercises.map(({ sessionKey, ...exercise }) => ({
       ...exercise,
-      sets: exercise.sets.map(set => ({
+      sets: exercise.sets.map(({ sessionKey: _setKey, ...set }) => ({
         ...set,
         weight: safeNumber(set.weight),
         reps: safeNumber(set.reps),
@@ -1493,11 +1352,7 @@ const WorkoutLogger = ({
       acc + ex.sets.reduce((sAcc, s) => sAcc + getSetVolume(s), 0), 0
     );
 
-    const timedOnlyActiveTime = sanitizedExercises.reduce((acc, ex) =>
-      acc + ex.sets.reduce((sAcc, s) =>
-        sAcc + (safeNumber(s.reps) > 0 ? 0 : safeNumber(s.timeTaken)), 0
-      ), 0
-    );
+    const timedOnlyActiveTime = getTimedOnlyActiveTime({ exercises: sanitizedExercises });
     const volumeIntensity = Math.round((totalVolume / (duration || 1)) * 0.1 * 100);
     const timedOnlyIntensity = Math.round((timedOnlyActiveTime / (duration || 1)) * 100);
     const intensity = volumeIntensity + timedOnlyIntensity;
@@ -1505,7 +1360,7 @@ const WorkoutLogger = ({
     try {
       const workoutData = {
         userId: currentUserId,
-        name,
+        name: name.trim(),
         date: serverTimestamp(),
         duration,
         totalVolume,
@@ -1528,6 +1383,7 @@ const WorkoutLogger = ({
       setIsComplete(true);
     } catch (e) {
       setSaveError('Your workout could not be saved. Your session is still here; check your connection and retry.');
+      saveLock.current = false;
       setIsSaving(false);
     }
   };
@@ -1576,6 +1432,7 @@ const WorkoutLogger = ({
   };
 
   const discardWorkout = () => {
+    if (!window.confirm('Discard this session? Your unsaved sets will be lost.')) return;
     clearActiveWorkoutSession(currentUserId);
     onCancel();
   };
@@ -1635,7 +1492,7 @@ const WorkoutLogger = ({
               onClick={onComplete}
               className="w-full bg-zinc-900 text-zinc-400 font-bold py-4 rounded-2xl border border-zinc-800"
             >
-              Back to Dashboard
+              View progress
             </button>
           </div>
         </motion.div>
@@ -1644,10 +1501,10 @@ const WorkoutLogger = ({
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0b1211] pb-32">
+    <div className="workout-logger editor-screen flex flex-col min-h-screen bg-[#0b1211] pb-32">
       <header className="sticky top-0 z-30 px-6 py-4 bg-[#0b1211]/95 backdrop-blur-sm border-b border-zinc-800/50">
         <input
-          type="text"
+          type="text" aria-label="Workout name" maxLength={100} disabled={isSaving}
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="text-lg font-bold bg-transparent border-none focus:ring-0 p-0 w-full break-words"
@@ -1657,7 +1514,8 @@ const WorkoutLogger = ({
             <Timer className="w-3 h-3" />
             <span>{formatTime(elapsed)}</span>
           </div>
-          <div className="flex space-x-2 shrink-0">
+          <div className="flex gap-2 flex-wrap justify-end">
+            {onMinimize && <button onClick={onMinimize} disabled={isSaving} className="text-zinc-400 font-bold px-2 text-sm" aria-label="Minimize workout">Minimize</button>}
             <button onClick={discardWorkout} disabled={isSaving} className="text-zinc-600 font-bold px-4">Discard</button>
             <button
               onClick={saveWorkout}
@@ -1687,12 +1545,13 @@ const WorkoutLogger = ({
             formatTimeTaken={formatTimeTaken}
             parseTimeTaken={parseTimeTaken}
             setStartTimes={setStartTimes}
+            now={startTime + elapsed * 1000} disabled={isSaving}
             addSet={addSet}
           />
         ))}
 
         <button
-          onClick={() => setShowExerciseSelector(true)}
+          disabled={isSaving || exercises.length >= 50} onClick={() => setShowExerciseSelector(true)}
           className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-[#C6F36B] font-bold hover:bg-zinc-800 transition-colors"
         >
           <Plus className="w-5 h-5" />
@@ -1708,6 +1567,7 @@ const WorkoutLogger = ({
 
 export default function App() {
   const [demoMode, setDemoMode] = useState(sessionStorage.getItem('fitai_sample_mode') === 'true');
+  const [initialSampleSession] = useState(() => demoMode ? loadActiveWorkoutSession(DEMO_UID) : null);
   const [appError, setAppError] = useState('');
   const [user, setUser] = useState<User | null>(() => demoMode ? demoUser as User : null);
   const [profile, setProfile] = useState<UserProfile | null>(() => demoMode ? readDemo().profile : null);
@@ -1731,19 +1591,23 @@ export default function App() {
   }, [googleAccessToken]);
   const [loading, setLoading] = useState(!demoMode);
   const [activeTab, setActiveTab] = useState<'dash' | 'ai' | 'routines' | 'profile'>('routines');
-  const [isLogging, setIsLogging] = useState(false);
+  const [isLogging, setIsLogging] = useState(Boolean(initialSampleSession));
   const [editingRoutine, setEditingRoutine] = useState<Routine | null | 'new'>(null);
   const [activeRoutine, setActiveRoutine] = useState<Routine | null>(null);
-  const [activeWorkoutSession, setActiveWorkoutSession] = useState<ActiveWorkoutSession | null>(null);
+  const [activeWorkoutSession, setActiveWorkoutSession] = useState<ActiveWorkoutSession | null>(initialSampleSession);
   const [workouts, setWorkouts] = useState<WorkoutLog[]>(() => demoMode ? readDemo().workouts : []);
   const [routines, setRoutines] = useState<Routine[]>(() => demoMode ? readDemo().routines : []);
+  const [workoutCursor, setWorkoutCursor] = useState<QueryDocumentSnapshot | null>(null);
+  const [historyComplete, setHistoryComplete] = useState(demoMode);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Back button + floating workout bubble state
-  const [isWorkoutMinimized, setIsWorkoutMinimized] = useState(false);
-  const [workoutStartTime, setWorkoutStartTime] = useState<number | null>(null);
-  const [workoutElapsed, setWorkoutElapsed] = useState(0);
+  const [isWorkoutMinimized, setIsWorkoutMinimized] = useState(Boolean(initialSampleSession));
+  const [workoutStartTime, setWorkoutStartTime] = useState<number | null>(initialSampleSession?.startTime ?? null);
+  const [workoutElapsed, setWorkoutElapsed] = useState(initialSampleSession ? Math.floor((Date.now() - initialSampleSession.startTime) / 1000) : 0);
   const [profileForceExit, setProfileForceExit] = useState(0);
   const [profileIsEditing, setProfileIsEditing] = useState(false);
+  const authUidRef = useRef(user?.uid ?? null);
 
   // Refs for popstate handler (so it always has latest values without re-registering)
   const activeTabRef = useRef(activeTab);
@@ -1757,6 +1621,16 @@ export default function App() {
   useEffect(() => { editingRoutineRef.current = editingRoutine; }, [editingRoutine]);
   useEffect(() => { isWorkoutMinimizedRef.current = isWorkoutMinimized; }, [isWorkoutMinimized]);
   useEffect(() => { profileIsEditingRef.current = profileIsEditing; }, [profileIsEditing]);
+
+  const restoreWorkoutSession = (uid: string) => {
+    const restored = loadActiveWorkoutSession(uid);
+    setActiveWorkoutSession(restored);
+    setActiveRoutine(null);
+    setIsLogging(Boolean(restored));
+    setIsWorkoutMinimized(Boolean(restored));
+    setWorkoutStartTime(restored?.startTime ?? null);
+    setWorkoutElapsed(restored ? Math.floor((Date.now() - restored.startTime) / 1000) : 0);
+  };
 
   // Browser back button handler
   useEffect(() => {
@@ -1786,8 +1660,8 @@ export default function App() {
       }
 
       // Priority 4: If on any non-home tab, go to home
-      if (activeTabRef.current !== 'dash') {
-        setActiveTab('dash');
+      if (activeTabRef.current !== 'routines') {
+        setActiveTab('routines');
         window.history.pushState({ app: true }, '');
         return;
       }
@@ -1816,14 +1690,23 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (demoMode) return;
+    if (demoMode) {
+      setHistoryComplete(true);
+      setWorkoutCursor(null);
+      restoreWorkoutSession(DEMO_UID);
+      return;
+    }
     testFirestoreConnection();
+    let latestAuthEvent = 0;
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      const eventId = ++latestAuthEvent;
+      authUidRef.current = u?.uid ?? null;
       setUser(u);
       try {
       if (u) {
         const profileRef = doc(db, 'users', u.uid);
         const snap = await getDoc(profileRef);
+        if (eventId !== latestAuthEvent) return;
         if (snap.exists()) {
           setProfile(snap.data() as UserProfile);
         } else {
@@ -1835,37 +1718,65 @@ export default function App() {
             createdAt: serverTimestamp()
           };
           await setDoc(profileRef, newProfile);
+          if (eventId !== latestAuthEvent) return;
           setProfile(newProfile as UserProfile);
         }
-        await Promise.all([fetchWorkouts(u.uid), fetchRoutines(u.uid)]);
-        const restoredWorkout = loadActiveWorkoutSession(u.uid);
-        if (restoredWorkout) {
-          setActiveWorkoutSession(restoredWorkout);
-          setActiveRoutine(null);
-          setIsLogging(true);
-          setIsWorkoutMinimized(true);
-          setWorkoutStartTime(restoredWorkout.startTime);
-        }
-      } else { setProfile(null); setWorkouts([]); setRoutines([]); }
-      } catch { setAppError('Your saved data could not load. Check your connection and reload.'); }
-      finally { setLoading(false); }
+        await Promise.all([
+          fetchWorkouts(u.uid, () => eventId === latestAuthEvent),
+          fetchRoutines(u.uid, () => eventId === latestAuthEvent)
+        ]);
+        if (eventId !== latestAuthEvent) return;
+        restoreWorkoutSession(u.uid);
+      } else {
+        setProfile(null); setWorkouts([]); setRoutines([]);
+        setActiveWorkoutSession(null); setActiveRoutine(null); setIsLogging(false); setIsWorkoutMinimized(false);
+        setWorkoutStartTime(null); setWorkoutElapsed(0);
+      }
+      } catch { if (eventId === latestAuthEvent) setAppError('Your saved data could not load. Check your connection and reload.'); }
+      finally { if (eventId === latestAuthEvent) setLoading(false); }
     });
-    return unsubscribe;
+    return () => { latestAuthEvent++; unsubscribe(); };
   }, [demoMode]);
 
-  const fetchWorkouts = async (uid: string) => {
-    if (demoMode) { setWorkouts(readDemo().workouts); return; }
+  const fetchWorkouts = async (uid: string, shouldApply: () => boolean = () => true) => {
+    if (demoMode) { setWorkouts(readDemo().workouts); setWorkoutCursor(null); setHistoryComplete(true); return; }
     const q = query(
       collection(db, 'workouts'),
       where('userId', '==', uid),
       orderBy('date', 'desc'),
-      limit(10)
+      limit(100)
     );
     const snap = await getDocs(q);
+    if (!shouldApply()) return;
     setWorkouts(snap.docs.map(d => ({ id: d.id, ...d.data() } as WorkoutLog)));
+    setWorkoutCursor(snap.docs.length === 100 ? snap.docs[snap.docs.length - 1] : null);
+    setHistoryComplete(snap.docs.length < 100);
   };
 
-  const fetchRoutines = async (uid: string) => {
+  const loadMoreWorkouts = async () => {
+    if (!user || demoMode || !workoutCursor || historyComplete || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const q = query(
+        collection(db, 'workouts'),
+        where('userId', '==', user.uid),
+        orderBy('date', 'desc'),
+        startAfter(workoutCursor),
+        limit(100)
+      );
+      const snap = await getDocs(q);
+      if (authUidRef.current !== user.uid) return;
+      const nextPage = snap.docs.map(d => ({ id: d.id, ...d.data() } as WorkoutLog));
+      setWorkouts(previous => {
+        const known = new Set(previous.map(w => w.id));
+        return [...previous, ...nextPage.filter(w => !known.has(w.id))];
+      });
+      setWorkoutCursor(snap.docs.length === 100 ? snap.docs[snap.docs.length - 1] : null);
+      setHistoryComplete(snap.docs.length < 100);
+    } finally { setLoadingMore(false); }
+  };
+
+  const fetchRoutines = async (uid: string, shouldApply: () => boolean = () => true) => {
     if (demoMode) { setRoutines(readDemo().routines); return; }
     const q = query(
       collection(db, 'routines'),
@@ -1873,6 +1784,7 @@ export default function App() {
       orderBy('createdAt', 'desc')
     );
     const snap = await getDocs(q);
+    if (!shouldApply()) return;
     setRoutines(snap.docs.map(d => ({ id: d.id, ...d.data() } as Routine)));
   };
 
@@ -2007,10 +1919,15 @@ export default function App() {
   };
 
   const signOutUser = async () => {
-    if (demoMode) { sessionStorage.removeItem('fitai_sample_mode'); setDemoMode(false); setUser(null); setWorkouts([]); setRoutines([]); }
-    else await signOut(auth);
-    setProfile(null);
-    setActiveWorkoutSession(null);
+    try {
+      if (demoMode) { sessionStorage.removeItem('fitai_sample_mode'); setDemoMode(false); setUser(null); setWorkouts([]); setRoutines([]); }
+      else await signOut(auth);
+      closeActiveWorkout(false);
+      setProfile(null);
+      setActiveWorkoutSession(null);
+    } catch {
+      setAppError('You could not be signed out. Check your connection and try again.');
+    }
   };
 
   const updateProfile = async (data: Partial<UserProfile>, proposal?: CoachProposal) => {
@@ -2029,6 +1946,10 @@ export default function App() {
 
   const startWorkout = (routine: Routine) => {
     if (!user) return;
+    if (isLogging) {
+      setAppError('A workout is already in progress. Resume or finish it before starting another.');
+      return;
+    }
     const session = createActiveWorkoutSession(user.uid, routine);
     saveActiveWorkoutSession(session);
     setActiveWorkoutSession(session);
@@ -2078,7 +1999,7 @@ export default function App() {
 
   if (!user) return (
     <AuthContext.Provider value={contextValue}>
-      <LoginScreen onExplore={() => { sessionStorage.setItem('fitai_sample_mode', 'true'); const data = readDemo(); setDemoMode(true); setUser(demoUser as User); setProfile(data.profile); setWorkouts(data.workouts); setRoutines(data.routines); setLoading(false); setAppError(''); }} />
+      <LoginScreen onExplore={() => { sessionStorage.setItem('fitai_sample_mode', 'true'); const data = readDemo(); setDemoMode(true); setUser(demoUser as User); setProfile(data.profile); setWorkouts(data.workouts); setRoutines(data.routines); setHistoryComplete(true); setWorkoutCursor(null); restoreWorkoutSession(DEMO_UID); setLoading(false); setAppError(''); }} />
     </AuthContext.Provider>
   );
 
@@ -2102,9 +2023,12 @@ export default function App() {
               routine={activeRoutine || undefined}
               workouts={workouts}
               initialSession={activeWorkoutSession}
-              onComplete={() => {
+              onMinimize={() => { setIsWorkoutMinimized(true); setActiveTab('routines'); }}
+              onComplete={async () => {
                 closeActiveWorkout(true);
-                fetchWorkouts(user.uid);
+                setActiveTab('dash');
+                try { await fetchWorkouts(user.uid); }
+                catch { setAppError('Workout saved, but progress could not refresh. Reload to see the latest history.'); }
               }}
               onCancel={() => {
                 closeActiveWorkout(true);
@@ -2116,7 +2040,7 @@ export default function App() {
         {/* Normal tab content: shown when not logging OR when minimized */}
         {(!isLogging || isWorkoutMinimized) && (
           <div className="app-shell text-white">
-            <header className="workspace-topbar"><a href="/" className="brand"><span className="brand-mark"><Dumbbell className="w-5 h-5" /></span>fitai<span className="brand-dot">.</span></a><div className="flex items-center gap-3"><span className="workspace-badge">{demoMode ? 'Sample workspace · local only' : 'Your training workspace'}</span><span className="workspace-user">{(profile?.displayName || profile?.name || 'You').slice(0, 1)}</span></div></header>
+            <header className={cn("workspace-topbar", isWorkoutMinimized && isLogging && "has-active-workout")}><a href="/" className="brand"><span className="brand-mark"><Dumbbell className="w-5 h-5" /></span>fitai<span className="brand-dot">.</span></a><div className="flex items-center gap-3">{isWorkoutMinimized && isLogging && <button type="button" onClick={() => setIsWorkoutMinimized(false)} aria-label="Resume workout" className="resume-workout inline-flex min-h-11 items-center gap-2 rounded-full border border-[#C6F36B]/50 px-3 text-sm font-semibold text-[#C6F36B] hover:bg-[#C6F36B]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C6F36B]"><Dumbbell className="h-4 w-4" /><span className="hidden sm:inline">Resume workout</span><span className="sm:hidden">Resume</span><span aria-label={`Elapsed ${formatBubbleTime(workoutElapsed)}`} className="font-mono text-xs">{formatBubbleTime(workoutElapsed)}</span></button>}<span className="workspace-badge">{demoMode ? 'Sample workspace · local only' : 'Your training workspace'}</span><span className="workspace-user">{(profile?.displayName || profile?.name || 'You').slice(0, 1)}</span></div></header>
             {appError && <div className="workspace-alert inline-error" role="alert">{appError}<button onClick={() => setAppError('')} aria-label="Dismiss notification">×</button></div>}
             <main className={cn("workspace-main", activeTab === 'ai' ? 'coach-main' : 'training-main')}>
               <AnimatePresence mode="wait">
@@ -2128,7 +2052,7 @@ export default function App() {
                   transition={{ duration: 0.2 }}
                   className={activeTab === 'ai' ? 'h-full' : 'training-content'}
                 >
-                  {activeTab === 'dash' && <React.Suspense fallback={<p className="text-zinc-400 py-8" role="status">Loading your progress…</p>}><Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} /></React.Suspense>}
+                  {activeTab === 'dash' && <React.Suspense fallback={<p className="text-zinc-400 py-8" role="status">Loading your progress…</p>}><Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} historyComplete={historyComplete} loadingMore={loadingMore} onLoadMore={loadMoreWorkouts} /></React.Suspense>}
                   {activeTab === 'ai' && (
                     <React.Suspense fallback={<p className="text-zinc-400 p-8" role="status">Opening your coach…</p>}><Coach user={user} preview={demoMode} workouts={workouts} profile={profile} routines={routines}
                       onDataChanged={async () => { await Promise.all([fetchWorkouts(user.uid), fetchRoutines(user.uid)]); if (demoMode) setProfile(readDemo().profile); else { const snap = await getDoc(doc(db, 'users', user.uid)); if (snap.exists()) setProfile(snap.data() as UserProfile); } }} /></React.Suspense>
@@ -2148,6 +2072,7 @@ export default function App() {
                       workouts={workouts}
                       onUpdate={updateProfile}
                       onSignOut={signOutUser}
+                      historyComplete={historyComplete}
                       forceExitEdit={profileForceExit}
                       onEditModeChange={setProfileIsEditing}
                     />
@@ -2164,45 +2089,19 @@ export default function App() {
                 { id: 'dash', icon: History, label: 'Progress' },
                 { id: 'profile', icon: UserIcon, label: 'Profile' },
               ].map((tab) => (
-                <button
-                  key={tab.id}
-                  aria-current={activeTab === tab.id ? 'page' : undefined}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={cn(
-                    "workspace-nav-item",
-                    activeTab === tab.id ? "text-[#C6F36B]" : "text-zinc-500"
-                  )}
-                >
-                  {/* Floating workout bubble — above the Me icon */}
-                  {tab.id === 'profile' && isWorkoutMinimized && isLogging && (
-                    <motion.div
-                      initial={{ scale: 0, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      onClick={(e) => { e.stopPropagation(); setIsWorkoutMinimized(false); }}
-                      className="absolute -top-14 left-1/2 -translate-x-1/2 z-50"
-                    >
-                      <div className="relative">
-                        {/* Pulsing ring */}
-                        <motion.div
-                          animate={{ scale: [1, 1.3, 1], opacity: [0.5, 0, 0.5] }}
-                          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                          className="absolute inset-0 rounded-full bg-[#C6F36B]/30"
-                        />
-                        {/* Bubble body */}
-                        <div className="w-12 h-12 rounded-full bg-[#C6F36B] flex items-center justify-center shadow-lg shadow-[#C6F36B]/30 border-2 border-[#C6F36B]/50">
-                          <div className="text-center">
-                            <Dumbbell className="w-4 h-4 text-black mx-auto" />
-                            <span className="text-[7px] font-mono font-bold text-black leading-none">
-                              {formatBubbleTime(workoutElapsed)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                  <tab.icon className="w-5 h-5" />
-                  <span>{tab.label}</span>
-                </button>
+                <div key={tab.id} className="relative flex-1 sm:flex-none">
+                  <button
+                    aria-current={activeTab === tab.id ? 'page' : undefined}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={cn(
+                      "workspace-nav-item w-full",
+                      activeTab === tab.id ? "text-[#C6F36B]" : "text-zinc-500"
+                    )}
+                  >
+                    <tab.icon className="w-5 h-5" />
+                    <span>{tab.label}</span>
+                  </button>
+                </div>
               ))}
               <div className="sidebar-note"><Sparkles className="w-5 h-5 text-[#C6F36B]" /><p>A plan is a starting point.<br />You set the pace.</p><span>{demoMode ? 'Sample data, real interactions.' : 'Small steps. Lasting progress.'}</span></div>
             </nav>

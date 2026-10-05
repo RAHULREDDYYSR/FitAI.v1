@@ -6,7 +6,7 @@ export const safeNumber = (value: any, fallback = 0) => {
 };
 
 export const getSetVolume = (set: Partial<WorkoutSet>) =>
-  set.completed === false ? 0 : safeNumber(set.weight) * safeNumber(set.reps);
+  set.completed === false ? 0 : Math.max(0, safeNumber(set.weight)) * Math.max(0, safeNumber(set.reps));
 
 export const getWorkoutVolume = (workout: Partial<WorkoutLog>) => {
   const storedVolume = safeNumber(workout.totalVolume, Number.NaN);
@@ -18,13 +18,13 @@ export const getWorkoutVolume = (workout: Partial<WorkoutLog>) => {
 
 export const getWorkoutActiveTime = (workout: Partial<WorkoutLog>) =>
   (workout.exercises || []).reduce((total, exercise) =>
-    total + exercise.sets.reduce((setTotal, set) => setTotal + safeNumber(set.timeTaken), 0), 0
+    total + exercise.sets.reduce((setTotal, set) => setTotal + (set.completed === false ? 0 : Math.max(0, safeNumber(set.timeTaken))), 0), 0
   );
 
 export const getTimedOnlyActiveTime = (workout: Partial<WorkoutLog>) =>
   (workout.exercises || []).reduce((total, exercise) =>
     total + exercise.sets.reduce((setTotal, set) =>
-      setTotal + (safeNumber(set.reps) > 0 ? 0 : safeNumber(set.timeTaken)), 0
+      setTotal + (set.completed === false || safeNumber(set.reps) > 0 ? 0 : Math.max(0, safeNumber(set.timeTaken))), 0
     ), 0
   );
 
@@ -63,4 +63,3 @@ export const formatSetPerformance = (set: Partial<WorkoutSet>) => {
 
   return parts.length > 0 ? parts.join(' | ') : 'Timed/bodyweight set';
 };
-

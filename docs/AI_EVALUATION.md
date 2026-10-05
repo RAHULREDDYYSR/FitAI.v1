@@ -21,6 +21,8 @@ The previous graph also made multiple routing/tool/synthesis calls, guessed work
 
 `tests/ui-smoke.py` runs the actual frontend and public sample endpoint in Chromium on desktop/mobile. It confirms that previewing and negative approval do not change data, that explicit application changes only the reviewed exercise, and that changes survive reload. It also exercises discard, progress loading and goal previews. Sample responses are templates and clearly labeled, so this is not evidence of live model quality or real Firebase transaction execution.
 
+The manual UI suite also runs against the built production frontend with desktop and real touch-enabled Chromium contexts. It checks routine cancel isolation, stable timers through reorder/delete/reload, invalid workout/profile saves, profile persistence, and six viewport sizes from 320×568 to 1920×1080. Separate dialog and progress checks cover nested Escape, focus trapping/restoration, matrix date filtering, body-weight validation, and keyboard access to workout details. These checks use the sample workspace and do not exercise real-account writes.
+
 ## Live evaluation
 
 `npm run eval:agents` has four credential-gated cases: missing personal-record facts, precise partial edits, unsupported new loads, and adversarial requests for fake sources/completion claims. Each enabled case verifies that the configured model was called. Missing credentials produce skipped tests. Authentication, network, timeout, and provider failures cannot count as passes.

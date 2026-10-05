@@ -78,3 +78,26 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Keep editing and live logging readable from compact phones to wide desktops. */
+.editor-screen { max-width: 900px; margin: 0 auto; color: #f4f7f5; }
+.editor-screen input { min-width: 0; max-width: 100%; }
+.editor-screen button:disabled { opacity: .45; cursor: default; }
+.exercise-heading { display: flex; align-items: center; gap: 6px; }
+.exercise-action { display: flex; align-items: center; justify-content: center; min-width: 36px; min-height: 44px; color: #a1a1aa; }
+.set-grid { display: grid; grid-template-columns: 28px 1fr 1fr 1.25fr 40px; gap: 6px; align-items: center; }
+.set-grid-heading { text-align: center; padding: 0 8px; }
+.set-grid input { width: 100%; min-width: 0; background: transparent; text-align: center; padding: 8px 0; border: 0; border-radius: 6px; font-size: 14px; }
+.set-grid input:focus-visible { outline: 1px solid #c6f36b; }
+.set-complete { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+.set-detail { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 11px; color: #a1a1aa; }
+.set-detail button { min-height: 40px; padding: 4px 8px; color: #c6f36b; }
+.profile-header { flex-wrap: wrap; gap: 12px; }
+@media (max-width: 400px) {
+  .routine-editor { padding: 16px 16px 120px; }
+  .routine-editor .grid-cols-4 { gap: 6px; grid-template-columns: 30px 1fr 1fr 36px; }
+  .routine-editor input[type=number] { padding: 8px 0; width: 100%; }
+  .workout-logger header { padding: 16px; }
+  .workout-logger > ul { padding-left: 16px; padding-right: 16px; }
+  .profile-section { padding: 16px 16px 112px; }
+}

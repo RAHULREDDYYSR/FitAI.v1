@@ -32,7 +32,14 @@ Alternatively, set `FITAI_OPENAI_API_KEY` through the project's Edge Function se
 npm run deploy:supabase -- --project-ref YOUR_PROJECT_REF
 
 export VITE_COACH_API_URL="https://YOUR_PROJECT_REF.supabase.co/functions/v1/fitai-api"
+npx --yes firebase-tools@latest login
 npm run deploy:hosting
+```
+
+In Windows PowerShell, replace the `export` command with:
+
+```powershell
+$env:VITE_COACH_API_URL="https://YOUR_PROJECT_REF.supabase.co/functions/v1/fitai-api"
 ```
 
 `deploy:supabase` validates and bundles the existing coach code into the function, then uploads it with API bundling; Docker is not required. `deploy:hosting` builds the frontend with its public backend URL and deploys only Hosting using `firebase.hosting-only.json`. It requires your normal Firebase Hosting login and project access. The Google Functions/Secret Manager billing requirement is avoided. An existing project suspended because of billing or other account issues may still require those issues to be resolved for Hosting itself.
