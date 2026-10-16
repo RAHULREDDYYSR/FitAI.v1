@@ -1,16 +1,37 @@
 @import "tailwindcss";
 
 @theme {
+  --color-bg: #0b1211;
+  --color-app-bg: #0e1613;
+  --color-surface: #131d1b;
+  --color-surface-raised: #1a261f;
+  --color-surface-hover: #26372e;
+  --color-fg: #f0f3ec;
+  --color-fg-soft: #d5e0d3;
+  --color-muted: #a7b6a6;
+  --color-subtle: #8d9d8c;
+  --color-border: #35483d;
+  --color-accent: #c6f36b;
+  --color-accent-hover: #d7ff8e;
+  --color-on-accent: #152018;
+  --color-secondary: #83dbce;
+  --color-danger: #ffb4a5;
+  --color-danger-bg: #32201b;
+  --color-danger-border: #895347;
+  --color-on-danger: #40150d;
+  --color-warning: #ffd38e;
+  --color-overlay: #020605;
+  --color-shadow: #000000;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 body {
-  @apply bg-[#0b1211] text-white antialiased selection:bg-[#C6F36B] selection:text-black;
+  @apply bg-bg text-fg antialiased selection:bg-accent selection:text-on-accent;
 }
 
 .markdown-body {
-  @apply text-zinc-300 leading-relaxed;
+  @apply text-fg-soft leading-relaxed;
 }
 
 .markdown-body p {
@@ -18,7 +39,7 @@ body {
 }
 
 .markdown-body h1, .markdown-body h2, .markdown-body h3 {
-  @apply text-white font-bold mb-2 mt-4 flex items-center gap-2;
+  @apply text-fg font-bold mb-2 mt-4 flex items-center gap-2;
 }
 
 .markdown-body ul, .markdown-body ol {
@@ -26,7 +47,7 @@ body {
 }
 
 .markdown-body code {
-  @apply bg-zinc-800 px-1 rounded text-[#CCFF00] font-mono text-sm;
+  @apply bg-surface-raised px-1 rounded text-accent font-mono text-sm;
 }
 
 /* Chat message markdown styling */
@@ -38,8 +59,8 @@ body {
 }
 
 .prose th {
-  background-color: rgba(204, 255, 0, 0.1);
-  border: 1px solid #3f3f46;
+  background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border: 1px solid var(--color-border);
   padding: 0.4rem 0.6rem;
   text-align: left;
   font-weight: 700;
@@ -47,17 +68,17 @@ body {
 }
 
 .prose td {
-  border: 1px solid #3f3f46;
+  border: 1px solid var(--color-border);
   padding: 0.4rem 0.6rem;
   white-space: nowrap;
 }
 
 .prose blockquote {
-  border-left: 3px solid #CCFF00;
+  border-left: 3px solid var(--color-accent);
   padding-left: 0.75rem;
   margin: 0.5rem 0;
   font-style: italic;
-  color: #a1a1aa;
+  color: var(--color-muted);
 }
 
 .prose h3, .prose h4 {
@@ -66,7 +87,7 @@ body {
 }
 
 .prose hr {
-  border-color: #3f3f46;
+  border-color: var(--color-border);
   margin: 0.75rem 0;
 }
 
@@ -80,18 +101,18 @@ body {
 }
 
 /* Keep editing and live logging readable from compact phones to wide desktops. */
-.editor-screen { max-width: 900px; margin: 0 auto; color: #f4f7f5; }
+.editor-screen { max-width: 900px; margin: 0 auto; color: var(--color-fg); }
 .editor-screen input { min-width: 0; max-width: 100%; }
 .editor-screen button:disabled { opacity: .45; cursor: default; }
 .exercise-heading { display: flex; align-items: center; gap: 6px; }
-.exercise-action { display: flex; align-items: center; justify-content: center; min-width: 36px; min-height: 44px; color: #a1a1aa; }
+.exercise-action { display: flex; align-items: center; justify-content: center; min-width: 36px; min-height: 44px; color: var(--color-muted); }
 .set-grid { display: grid; grid-template-columns: 28px 1fr 1fr 1.25fr 40px; gap: 6px; align-items: center; }
 .set-grid-heading { text-align: center; padding: 0 8px; }
 .set-grid input { width: 100%; min-width: 0; background: transparent; text-align: center; padding: 8px 0; border: 0; border-radius: 6px; font-size: 14px; }
-.set-grid input:focus-visible { outline: 1px solid #c6f36b; }
+.set-grid input:focus-visible { outline: 1px solid var(--color-accent); }
 .set-complete { min-height: 44px; display: flex; align-items: center; justify-content: center; }
-.set-detail { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 11px; color: #a1a1aa; }
-.set-detail button { min-height: 40px; padding: 4px 8px; color: #c6f36b; }
+.set-detail { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--color-muted); }
+.set-detail button { min-height: 40px; padding: 4px 8px; color: var(--color-accent); }
 .profile-header { flex-wrap: wrap; gap: 12px; }
 @media (max-width: 400px) {
   .routine-editor { padding: 16px 16px 120px; }

@@ -18,15 +18,15 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
     <div
       onClick={() => setIsExpanded(!isExpanded)}
       className={cn(
-        "bg-[#131d1b] rounded-2xl border transition-all cursor-pointer overflow-hidden",
-        isExpanded ? "border-[#C6F36B]/50" : "border-zinc-800 hover:border-zinc-700"
+        "bg-surface rounded-2xl border transition-all cursor-pointer overflow-hidden",
+        isExpanded ? "border-accent/50" : "border-border hover:border-accent/50"
       )}
     >
       <div className="p-5 space-y-4">
         <div className="flex items-start justify-between">
           <div>
             <button type="button" aria-expanded={isExpanded} aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${workout.name} workout details`} onClick={event => { event.stopPropagation(); setIsExpanded(!isExpanded); }} className="text-lg font-bold tracking-tight text-left">{workout.name}</button>
-            <div className="text-xs text-zinc-500 font-mono italic">
+            <div className="text-xs text-muted font-mono italic">
               {format(new Date(workout.date.seconds * 1000), 'EEEE, MMMM d')}
             </div>
           </div>
@@ -49,32 +49,32 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
                   alert("Workout summary copied to clipboard!");
                 }
               }}
-              className="p-2 text-zinc-600 hover:text-[#C6F36B] transition-colors"
+              className="p-2 text-subtle hover:text-accent transition-colors"
               title="Share Workout"
             >
               <Share2 className="w-4 h-4" />
             </button>
             <div className="text-right">
-              <div className="text-[#C6F36B] font-bold">{totalVolume} kg</div>
-              <div className="text-[10px] text-zinc-500 font-mono">{Math.floor(workout.duration / 60)} mins</div>
+              <div className="text-accent font-bold">{totalVolume} kg</div>
+              <div className="text-[10px] text-muted font-mono">{Math.floor(workout.duration / 60)} mins</div>
             </div>
             {isExpanded ? (
-              <ChevronDown className="w-5 h-5 text-zinc-600" />
+              <ChevronDown className="w-5 h-5 text-subtle" />
             ) : (
-              <ChevronRight className="w-5 h-5 text-zinc-600" />
+              <ChevronRight className="w-5 h-5 text-subtle" />
             )}
           </div>
         </div>
 
-        <div className="flex items-center space-x-4 py-2 border-y border-zinc-800/30">
+        <div className="flex items-center space-x-4 py-2 border-y border-border/30">
           <div className="flex flex-col">
-            <span className="text-[9px] text-zinc-500 uppercase font-mono">Intensity Score</span>
-            <span className="text-xs font-bold text-[#C6F36B]">{intensity} <span className="text-[10px] font-normal opacity-50 uppercase font-mono">pts</span></span>
+            <span className="text-[9px] text-muted uppercase font-mono">Intensity Score</span>
+            <span className="text-xs font-bold text-accent">{intensity} <span className="text-[10px] font-normal opacity-50 uppercase font-mono">pts</span></span>
           </div>
-          <div className="h-4 w-px bg-zinc-800" />
+          <div className="h-4 w-px bg-surface-hover" />
           <div className="flex flex-col">
-            <span className="text-[9px] text-zinc-500 uppercase font-mono">Efficiency</span>
-            <span className="text-xs font-bold text-white">{efficiency} pts</span>
+            <span className="text-[9px] text-muted uppercase font-mono">Efficiency</span>
+            <span className="text-xs font-bold text-fg">{efficiency} pts</span>
           </div>
         </div>
 
@@ -87,22 +87,22 @@ const WorkoutCard = ({ workout }: { workout: WorkoutLog }) => {
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <div className="space-y-4 pt-4 border-t border-zinc-800/30 mt-2">
+              <div className="space-y-4 pt-4 border-t border-border/30 mt-2">
                 {workout.exercises.map((ex, exIdx) => (
                   <div key={exIdx} className="space-y-3">
-                    <div className="text-xs font-bold text-zinc-300 flex items-center justify-between">
+                    <div className="text-xs font-bold text-fg-soft flex items-center justify-between">
                       <div className="flex items-center space-x-3">
                         <span>{ex.name}</span>
                       </div>
-                      <span className="text-[10px] text-zinc-500 font-mono bg-zinc-800 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] text-muted font-mono bg-surface-hover px-2 py-0.5 rounded-full">
                         {ex.sets.length} {ex.sets.length === 1 ? 'Set' : 'Sets'}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {ex.sets.map((set, sIdx) => (
-                        <div key={sIdx} className="bg-zinc-900/50 border border-zinc-800 p-2 rounded-lg flex flex-col justify-center">
-                          <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-tighter">Set {sIdx + 1}</span>
-                          <span className="text-xs font-bold text-zinc-400">
+                        <div key={sIdx} className="bg-surface-raised/50 border border-border p-2 rounded-lg flex flex-col justify-center">
+                          <span className="text-[9px] font-mono text-subtle uppercase tracking-tighter">Set {sIdx + 1}</span>
+                          <span className="text-xs font-bold text-muted">
                             {formatSetPerformance(set)}
                           </span>
                         </div>
@@ -308,14 +308,14 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
             <button
               onClick={() => setView('chart')}
               aria-pressed={view === 'chart'}
-              className={cn("min-h-11 min-w-11 text-[10px] font-mono uppercase tracking-widest px-3 py-2 rounded-xl", view === 'chart' ? "bg-[#C6F36B] text-black" : "text-zinc-500")}
+              className={cn("min-h-11 min-w-11 text-[10px] font-mono uppercase tracking-widest px-3 py-2 rounded-xl", view === 'chart' ? "bg-accent text-on-accent" : "text-muted")}
             >
               Chart
             </button>
             <button
               onClick={() => setView('matrix')}
               aria-pressed={view === 'matrix'}
-              className={cn("min-h-11 min-w-11 text-[10px] font-mono uppercase tracking-widest px-3 py-2 rounded-xl", view === 'matrix' ? "bg-[#C6F36B] text-black" : "text-zinc-500")}
+              className={cn("min-h-11 min-w-11 text-[10px] font-mono uppercase tracking-widest px-3 py-2 rounded-xl", view === 'matrix' ? "bg-accent text-on-accent" : "text-muted")}
             >
               Matrix
             </button>
@@ -328,29 +328,29 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
               aria-pressed={showTimeMatrix}
               className={cn(
                 "min-h-11 px-3 py-2 rounded-full text-[10px] font-bold transition-all border",
-                showTimeMatrix ? "bg-[#C6F36B] border-[#C6F36B] text-black" : "bg-zinc-900 border-zinc-800 text-zinc-500"
+                showTimeMatrix ? "bg-accent border-accent text-on-accent" : "bg-surface-raised border-border text-muted"
               )}
             >
               {showTimeMatrix ? 'Hide Time' : 'Show Time Matrix'}
             </button>
           )}
-          <div className="bg-[#131d1b] p-2 rounded-full">
-            <Sparkles className="w-5 h-5 text-[#C6F36B]" />
+          <div className="bg-surface p-2 rounded-full">
+            <Sparkles className="w-5 h-5 text-accent" />
           </div>
         </div>
       </header>
 
-      {!historyComplete && <section className="bg-[#17211f] p-4 rounded-2xl border border-[#C6F36B]/25 space-y-3" aria-label="Workout history status">
-        <p className="text-sm text-zinc-300">Showing {workouts.length} loaded sessions. Date filters and charts cover this loaded history; older sessions have not loaded yet.</p>
+      {!historyComplete && <section className="bg-surface-raised p-4 rounded-2xl border border-accent/25 space-y-3" aria-label="Workout history status">
+        <p className="text-sm text-fg-soft">Showing {workouts.length} loaded sessions. Date filters and charts cover this loaded history; older sessions have not loaded yet.</p>
         {historyError && <p className="inline-error" role="alert">{historyError}</p>}
         {onLoadMore && <button type="button" className="secondary-button min-h-11 w-full sm:w-auto" onClick={loadMoreHistory} disabled={loadingMore}>
           {loadingMore ? 'Loading older sessions…' : 'Load older sessions'}
         </button>}
       </section>}
 
-      <div className="bg-[#131d1b] p-4 rounded-2xl border border-zinc-800 space-y-4 min-w-0">
+      <div className="bg-surface p-4 rounded-2xl border border-border space-y-4 min-w-0">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl max-w-full overflow-x-auto">
+          <div className="flex items-center gap-1 bg-surface/50 p-1 rounded-xl max-w-full overflow-x-auto">
             {(['all', 'week', 'month', 'year', 'custom'] as const).map((type) => (
               <button
                 key={type}
@@ -359,16 +359,16 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
                 className={cn(
                   "shrink-0 min-h-11 px-3 py-2 rounded-lg text-[10px] font-bold uppercase transition-all",
                   filterType === type
-                    ? "bg-[#C6F36B] text-black"
-                    : "text-zinc-500 hover:text-zinc-300"
+                    ? "bg-accent text-on-accent"
+                    : "text-muted hover:text-fg-soft"
                 )}
               >
                 {type === 'all' && !historyComplete ? 'All loaded' : type}
               </button>
             ))}
           </div>
-          <div className="flex items-center space-x-2 text-[10px] text-zinc-500 font-mono uppercase shrink-0">
-            <span className="w-2 h-2 rounded-full bg-[#C6F36B] animate-pulse" />
+          <div className="flex items-center space-x-2 text-[10px] text-muted font-mono uppercase shrink-0">
+            <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
             <span>{filteredWorkouts.length} {historyComplete ? 'results' : 'loaded results'}</span>
           </div>
         </div>
@@ -377,26 +377,26 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
-            className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800"
+            className="grid grid-cols-2 gap-3 pt-2 border-t border-border"
           >
             <div className="flex-1">
-              <label htmlFor="progress-date-start" className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">Start</label>
+              <label htmlFor="progress-date-start" className="block text-[8px] text-subtle uppercase font-mono mb-1">Start</label>
               <input
                 id="progress-date-start"
                 type="date"
                 value={customRange.start}
                 onChange={(e) => setCustomRange(prev => ({ ...prev, start: e.target.value }))}
-                className="w-full min-w-0 bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
+                className="w-full min-w-0 bg-surface-raised border border-border rounded-lg p-2 text-xs text-fg outline-none focus:border-accent/50"
               />
             </div>
             <div className="flex-1">
-              <label htmlFor="progress-date-end" className="block text-[8px] text-zinc-600 uppercase font-mono mb-1">End</label>
+              <label htmlFor="progress-date-end" className="block text-[8px] text-subtle uppercase font-mono mb-1">End</label>
               <input
                 id="progress-date-end"
                 type="date"
                 value={customRange.end}
                 onChange={(e) => setCustomRange(prev => ({ ...prev, end: e.target.value }))}
-                className="w-full min-w-0 bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
+                className="w-full min-w-0 bg-surface-raised border border-border rounded-lg p-2 text-xs text-fg outline-none focus:border-accent/50"
               />
             </div>
           </motion.div>
@@ -405,33 +405,35 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
 
       {view === 'chart' ? (
         <div className="space-y-4">
-          <div className="bg-[#131d1b] rounded-2xl p-4 border border-zinc-800 h-[240px]">
+          <div className="bg-surface rounded-2xl p-4 border border-border h-[240px]">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">Training Volume</span>
+              <span className="text-[10px] text-muted uppercase font-mono tracking-widest">Training Volume</span>
             </div>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data}>
                 <defs>
                   <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#C6F36B" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#C6F36B" stopOpacity={0} />
+                    <stop offset="5%" stopColor="var(--color-accent)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--color-accent)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="date" stroke="#525252" fontSize={10} axisLine={false} tickLine={false} />
+                <XAxis dataKey="date" stroke="var(--color-muted)" fontSize={10} axisLine={false} tickLine={false} />
                 <Tooltip
-                  contentStyle={{ background: '#0b1211', border: '1px solid #262626', borderRadius: '12px' }}
-                  itemStyle={{ color: '#C6F36B' }}
+                  cursor={{ fill: 'var(--color-surface-hover)', stroke: 'var(--color-border)' }}
+                  contentStyle={{ background: 'var(--color-surface-raised)', border: '1px solid var(--color-border)', borderRadius: '12px', color: 'var(--color-fg)' }}
+                  labelStyle={{ color: 'var(--color-fg)' }}
+                  itemStyle={{ color: 'var(--color-accent)' }}
                 />
-                <Area type="monotone" dataKey="volume" stroke="#C6F36B" fillOpacity={1} fill="url(#colorVolume)" />
+                <Area type="monotone" dataKey="volume" stroke="var(--color-accent)" fillOpacity={1} fill="url(#colorVolume)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
 
-          <div className="bg-[#131d1b] rounded-2xl p-4 border border-zinc-800 space-y-4">
+          <div className="bg-surface rounded-2xl p-4 border border-border space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center space-x-2">
-                <span className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">Body Weight</span>
-                <span className="text-xl font-bold">{profile?.weight || '-'} <span className="text-[10px] text-zinc-500">kg</span></span>
+                <span className="text-[10px] text-muted uppercase font-mono tracking-widest">Body Weight</span>
+                <span className="text-xl font-bold">{profile?.weight || '-'} <span className="text-[10px] text-muted">kg</span></span>
               </div>
               <div className="flex items-center gap-2 ml-auto max-w-full">
                 <label htmlFor="progress-todays-weight" className="sr-only">Today's body weight in kilograms</label>
@@ -446,7 +448,7 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
                   placeholder="Today's kg"
                   value={newWeight}
                   onChange={(e) => { setNewWeight(e.target.value); setWeightError(''); }}
-                  className="w-[100px] min-w-0 bg-black border border-zinc-800 rounded-lg p-2 text-xs text-white outline-none focus:border-[#C6F36B]/50"
+                  className="w-[100px] min-w-0 bg-surface-raised border border-border rounded-lg p-2 text-xs text-fg outline-none focus:border-accent/50"
                   step="0.1"
                 />
                 <button
@@ -454,38 +456,40 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
                   aria-label="Save today's body weight"
                   onClick={handleAddWeight}
                   disabled={isAddingWeight || !validWeight}
-                  className="min-h-11 min-w-11 grid place-items-center bg-[#C6F36B] text-black rounded-lg disabled:opacity-50"
+                  className="min-h-11 min-w-11 grid place-items-center bg-accent text-on-accent rounded-lg disabled:opacity-50"
                 >
                   {isAddingWeight ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 </button>
               </div>
             </div>
-            {newWeight && !validWeight && <p id="progress-weight-range" className="text-xs text-amber-200" role="status">Enter a weight from 20 to 500 kg.</p>}
+            {newWeight && !validWeight && <p id="progress-weight-range" className="text-xs text-danger" role="status">Enter a weight from 20 to 500 kg.</p>}
             {weightError && <p id="progress-weight-error" className="inline-error" role="alert">{weightError}</p>}
 
             <div className="h-[180px]">
               {weightData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={weightData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#262626" />
-                    <XAxis dataKey="date" stroke="#525252" fontSize={8} axisLine={false} tickLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" />
+                    <XAxis dataKey="date" stroke="var(--color-muted)" fontSize={8} axisLine={false} tickLine={false} />
                     <YAxis hide domain={['dataMin - 5', 'dataMax + 5']} />
                     <Tooltip
-                      contentStyle={{ background: '#0b1211', border: '1px solid #262626', borderRadius: '12px', fontSize: '10px' }}
-                      itemStyle={{ color: '#C6F36B' }}
+                      cursor={{ stroke: 'var(--color-border)', strokeWidth: 1 }}
+                      contentStyle={{ background: 'var(--color-surface-raised)', border: '1px solid var(--color-border)', borderRadius: '12px', fontSize: '10px', color: 'var(--color-fg)' }}
+                      labelStyle={{ color: 'var(--color-fg)' }}
+                      itemStyle={{ color: 'var(--color-secondary)' }}
                     />
                     <Line
                       type="monotone"
                       dataKey="weight"
-                      stroke="#C6F36B"
+                      stroke="var(--color-secondary)"
                       strokeWidth={2}
-                      dot={{ fill: '#C6F36B', r: 3 }}
-                      activeDot={{ r: 5, stroke: '#C6F36B', strokeWidth: 2 }}
+                      dot={{ fill: 'var(--color-secondary)', stroke: 'var(--color-secondary)', r: 3 }}
+                      activeDot={{ r: 5, fill: 'var(--color-surface)', stroke: 'var(--color-secondary)', strokeWidth: 2 }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-zinc-600 border border-dashed border-zinc-800 rounded-xl">
+                <div className="h-full flex flex-col items-center justify-center text-subtle border border-dashed border-border rounded-xl">
                   <p className="text-[10px] uppercase font-mono">No weight data for this range</p>
                 </div>
               )}
@@ -493,54 +497,54 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
           </div>
         </div>
       ) : (
-        <div className="bg-[#131d1b] rounded-2x border border-zinc-800 overflow-hidden">
+        <div className="bg-surface rounded-2x border border-border overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs font-mono">
-              <thead className="bg-zinc-900 text-zinc-500 uppercase tracking-tighter">
+              <thead className="bg-surface-raised text-muted uppercase tracking-tighter">
                 <tr>
-                  <th className="p-3 border-b border-zinc-800">Session</th>
-                  <th className="p-3 border-b border-zinc-800">Volume</th>
-                  {showTimeMatrix && <th className="p-3 border-b border-zinc-800">Time</th>}
-                  {showTimeMatrix && <th className="p-3 border-b border-zinc-800">Active</th>}
-                  {showTimeMatrix && <th className="p-3 border-b border-zinc-800">Intensity</th>}
+                  <th className="p-3 border-b border-border">Session</th>
+                  <th className="p-3 border-b border-border">Volume</th>
+                  {showTimeMatrix && <th className="p-3 border-b border-border">Time</th>}
+                  {showTimeMatrix && <th className="p-3 border-b border-border">Active</th>}
+                  {showTimeMatrix && <th className="p-3 border-b border-border">Intensity</th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody className="divide-y divide-border/50">
                 {filteredWorkouts.slice(0, 10).map((w, i) => {
                   const totalActiveTime = getTimedOnlyActiveTime(w);
                   const totalVolume = getWorkoutVolume(w);
                   return (
-                    <tr key={w.id || `${w.date.seconds}-${i}`} className="hover:bg-white/5 transition-colors">
+                    <tr key={w.id || `${w.date.seconds}-${i}`} className="hover:bg-surface-hover/50 transition-colors">
                       <td className="p-3 font-bold">{format(new Date(w.date.seconds * 1000), 'MMM d')}</td>
-                      <td className="p-3 text-[#C6F36B] font-bold">{totalVolume}kg</td>
-                      {showTimeMatrix && <td className="p-3 text-zinc-400">{Math.floor(w.duration / 60)}m</td>}
-                      {showTimeMatrix && <td className="p-3 text-zinc-500">{Math.floor(totalActiveTime / 60)}m</td>}
-                      {showTimeMatrix && <td className="p-3 text-[#C6F36B] font-bold">{getWorkoutIntensity(w) || '-'}</td>}
+                      <td className="p-3 text-accent font-bold">{totalVolume}kg</td>
+                      {showTimeMatrix && <td className="p-3 text-muted">{Math.floor(w.duration / 60)}m</td>}
+                      {showTimeMatrix && <td className="p-3 text-muted">{Math.floor(totalActiveTime / 60)}m</td>}
+                      {showTimeMatrix && <td className="p-3 text-accent font-bold">{getWorkoutIntensity(w) || '-'}</td>}
                     </tr>
                   );
                 })}
-                {filteredWorkouts.length === 0 && <tr><td colSpan={showTimeMatrix ? 5 : 2} className="p-6 text-center text-zinc-500">No sessions match this date range.</td></tr>}
+                {filteredWorkouts.length === 0 && <tr><td colSpan={showTimeMatrix ? 5 : 2} className="p-6 text-center text-muted">No sessions match this date range.</td></tr>}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      <div className="bg-[#131d1b] rounded-2xl p-4 border border-zinc-800 h-[300px] flex flex-col">
-        <div className="flex items-center space-x-2 text-[10px] text-zinc-500 uppercase font-mono mb-4">
+      <div className="bg-surface rounded-2xl p-4 border border-border h-[300px] flex flex-col">
+        <div className="flex items-center space-x-2 text-[10px] text-muted uppercase font-mono mb-4">
           <Sparkles className="w-3 h-3" />
           <span>Muscle Intelligence Radar</span>
         </div>
         <ResponsiveContainer width="100%" height="100%">
           <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-            <PolarGrid stroke="#262626" />
-            <PolarAngleAxis dataKey="subject" tick={{ fill: '#525252', fontSize: 10 }} />
+            <PolarGrid stroke="var(--color-border)" />
+            <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--color-muted)', fontSize: 10 }} />
             <PolarRadiusAxis axisLine={false} tick={false} domain={[0, 'auto']} />
             <Radar
               name="Volume"
               dataKey="value"
-              stroke="#C6F36B"
-              fill="#C6F36B"
+              stroke="var(--color-accent)"
+              fill="var(--color-accent)"
               fillOpacity={0.3}
             />
           </RadarChart>
@@ -552,10 +556,10 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
           { label: historyComplete ? 'Total Logs' : 'Loaded Sessions', value: historyComplete ? filteredWorkouts.length : workouts.length, icon: History },
           { label: 'Avg Volume', value: Math.round(filteredWorkouts.reduce((acc, curr) => acc + getWorkoutVolume(curr), 0) / (filteredWorkouts.length || 1)), icon: Dumbbell },
         ].map((stat, i) => (
-          <div key={i} className="bg-[#131d1b] p-4 rounded-2xl border border-zinc-800">
-            <stat.icon className="w-4 h-4 text-zinc-500 mb-2" />
+          <div key={i} className="bg-surface p-4 rounded-2xl border border-border">
+            <stat.icon className="w-4 h-4 text-muted mb-2" />
             <div className="text-2xl font-bold tracking-tight">{stat.value}</div>
-            <div className="text-[10px] text-zinc-500 uppercase font-mono tracking-wider">{stat.label}</div>
+            <div className="text-[10px] text-muted uppercase font-mono tracking-wider">{stat.label}</div>
           </div>
         ))}
       </div>
@@ -563,12 +567,12 @@ const Dashboard = ({ workouts, profile, onUpdateProfile, historyComplete = true,
       <div>
         <h3 className="text-lg font-bold mb-4 flex items-center space-x-2">
           <span>Recent Workouts</span>
-          <History className="w-4 h-4 text-zinc-500" />
+          <History className="w-4 h-4 text-muted" />
         </h3>
         <div className="space-y-4">
           {workouts.length === 0 ? (
-            <div className="bg-[#131d1b] p-8 rounded-2xl border border-dashed border-zinc-800 text-center">
-              <p className="text-zinc-500 text-sm italic">No logs yet. Start your engine.</p>
+            <div className="bg-surface p-8 rounded-2xl border border-dashed border-border text-center">
+              <p className="text-muted text-sm italic">No logs yet. Start your engine.</p>
             </div>
           ) : (
             workouts.slice(0, 3).map((w, idx) => (

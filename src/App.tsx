@@ -80,6 +80,7 @@ import { safeNumber, getSetVolume, getWorkoutVolume, getWorkoutIntensity, getTim
 import { createActiveWorkoutSession, saveActiveWorkoutSession, loadActiveWorkoutSession, clearActiveWorkoutSession, setTimerKey, type ActiveWorkoutExercise, type ActiveWorkoutSession } from './lib/active-workout';
 import { validateManualRoutine, validateManualProfile, validateWorkout } from './lib/manual-validation';
 import { useDialog } from './lib/use-dialog';
+import { SettingsButton } from './components/Settings';
 
 
 const Coach = React.lazy(() => import('./components/Coach').then(module => ({ default: module.Coach })));
@@ -111,14 +112,14 @@ function useAuth() {
 // --- Components ---
 
 const LoadingScreen = () => (
-  <div className="fixed inset-0 bg-[#0b1211] flex flex-col items-center justify-center space-y-4">
+  <div className="fixed inset-0 bg-bg flex flex-col items-center justify-center space-y-4">
     <motion.div
       animate={{ rotate: 360 }}
       transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
     >
-      <Dumbbell className="w-12 h-12 text-[#C6F36B]" />
+      <Dumbbell className="w-12 h-12 text-accent" />
     </motion.div>
-    <div className="text-white font-mono text-xs tracking-widest uppercase opacity-50">Initializing FitAI</div>
+    <div className="text-fg font-mono text-xs tracking-widest uppercase opacity-50">Initializing FitAI</div>
   </div>
 );
 
@@ -127,9 +128,9 @@ const LoginScreen = ({ onExplore }: { onExplore: () => void }) => {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   return <div className="landing-page">
-    <header className="landing-nav"><a href="/" className="brand"><span className="brand-mark"><Dumbbell className="w-5 h-5" /></span>fitai<span className="brand-dot">.</span></a><span className="landing-note">A stronger you, one session at a time.</span></header>
+    <header className="landing-nav"><a href="/" className="brand"><span className="brand-mark"><Dumbbell className="w-5 h-5" /></span>fitai<span className="brand-dot">.</span></a><div className="flex items-center gap-4"><span className="landing-note">A stronger you, one session at a time.</span><SettingsButton /></div></header>
     <main className="landing-grid">
-      <section className="landing-copy"><p className="eyebrow text-[#C6F36B]">Your training, with a little more direction</p><h1>Less guesswork.<br />More <span>good reps.</span></h1><p className="landing-description">A thoughtful training partner for your everyday progress. Build your routine, track what matters, and make changes with confidence.</p>
+      <section className="landing-copy"><p className="eyebrow text-accent">Your training, with a little more direction</p><h1>Less guesswork.<br />More <span>good reps.</span></h1><p className="landing-description">A thoughtful training partner for your everyday progress. Build your routine, track what matters, and make changes with confidence.</p>
         <div className="landing-actions"><button className="primary-button" disabled={busy} onClick={async () => { setBusy(true); setError(''); try { await signIn(); } catch (e: any) { setError(e.code === 'auth/popup-closed-by-user' ? 'Sign-in was closed. You can try again or explore the sample workspace.' : 'Could not sign in. Check your connection and try again.'); } finally { setBusy(false); } }}>{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserIcon className="w-4 h-4" />}Continue with Google<ChevronRight className="w-4 h-4" /></button><button className="secondary-button" disabled={busy} onClick={onExplore}>Explore sample workspace</button></div>
         {error && <p className="inline-error" role="alert">{error}</p>}
         <p className="landing-footnote">Your routines. Your pace. You review every coach-suggested change.</p>
@@ -137,8 +138,8 @@ const LoginScreen = ({ onExplore }: { onExplore: () => void }) => {
       </section>
       <section className="landing-art" aria-label="Example training workspace">
         <div className="orbit orbit-one" /><div className="orbit orbit-two" /><span className="art-caption">Built for the long game.</span>
-        <div className="training-preview"><div className="flex justify-between items-center"><span className="eyebrow text-zinc-400">Sample training plan</span><span className="preview-tag">Strength</span></div><h2>Find your rhythm.</h2><p>Three focused sessions. A little stronger each week.</p><div className="preview-days">{['M','T','W','T','F','S','S'].map((day,i)=><div key={i} className={[0,2,4].includes(i)?'training-day active':'training-day'}>{day}{[0,2,4].includes(i)?<Dumbbell className="w-4 h-4" />:<span>—</span>}</div>)}</div><div className="preview-session"><span className="coach-avatar"><Dumbbell className="w-5 h-5" /></span><div><strong>Upper body</strong><p>Controlled reps. Consistent progress.</p></div><Play className="w-4 h-4 ml-auto" /></div></div>
-        <div className="review-float"><CheckCircle2 className="w-5 h-5 text-[#C6F36B]" /><div><strong>You have the final say.</strong><p>Preview your changes before saving.</p></div></div>
+        <div className="training-preview"><div className="flex justify-between items-center"><span className="eyebrow text-muted">Sample training plan</span><span className="preview-tag">Strength</span></div><h2>Find your rhythm.</h2><p>Three focused sessions. A little stronger each week.</p><div className="preview-days">{['M','T','W','T','F','S','S'].map((day,i)=><div key={i} className={[0,2,4].includes(i)?'training-day active':'training-day'}>{day}{[0,2,4].includes(i)?<Dumbbell className="w-4 h-4" />:<span>—</span>}</div>)}</div><div className="preview-session"><span className="coach-avatar"><Dumbbell className="w-5 h-5" /></span><div><strong>Upper body</strong><p>Controlled reps. Consistent progress.</p></div><Play className="w-4 h-4 ml-auto" /></div></div>
+        <div className="review-float"><CheckCircle2 className="w-5 h-5 text-accent" /><div><strong>You have the final say.</strong><p>Preview your changes before saving.</p></div></div>
       </section>
     </main>
     <footer className="landing-footer"><span>Move with purpose.</span><span>FitAI · Train with intention</span></footer>
@@ -178,11 +179,11 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className="fixed inset-0 z-[70] bg-black flex flex-col sm:inset-4 sm:rounded-3xl sm:border sm:border-zinc-800"
+      className="fixed inset-0 z-[70] bg-bg flex flex-col sm:inset-4 sm:rounded-3xl sm:border sm:border-border"
       role="dialog" aria-modal="true" aria-labelledby="custom-exercise-title" tabIndex={-1} ref={dialogRef}
     >
-      <header className="flex items-center justify-between p-4 border-b border-zinc-900">
-        <button onClick={requestCancel} disabled={saving} aria-label="Cancel adding exercise" className="p-2 text-zinc-400">
+      <header className="flex items-center justify-between p-4 border-b border-border">
+        <button onClick={requestCancel} disabled={saving} aria-label="Cancel adding exercise" className="p-2 text-muted">
           <ChevronLeft className="w-6 h-6" />
         </button>
         <h2 id="custom-exercise-title" className="text-lg font-bold">New Exercise</h2>
@@ -206,7 +207,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
             } finally { saveLock.current = false; setSaving(false); }
           }}
           disabled={saving || !trimmedName || selectedMuscleGroups.length === 0 || selectedEquipmentList.length === 0}
-          className="bg-[#C6F36B] text-black px-4 py-1.5 rounded-full text-xs font-bold disabled:opacity-50"
+          className="bg-accent text-on-accent px-4 py-1.5 rounded-full text-xs font-bold disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
@@ -214,7 +215,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
 
       <div className="flex-1 overflow-y-auto no-scrollbar p-4 sm:p-6 space-y-8">
         <div className="space-y-2">
-          <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Exercise Name</label>
+          <label className="text-[10px] uppercase font-bold text-muted tracking-widest">Exercise Name</label>
           <input
             type="text"
             value={name}
@@ -223,7 +224,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
             disabled={saving}
             onChange={e => setName(e.target.value)}
             placeholder="e.g. Incline Machine Press"
-            className="w-full bg-[#131d1b] border-none rounded-2xl p-4 text-white placeholder:text-zinc-700 focus:ring-1 focus:ring-[#C6F36B] outline-none text-lg font-bold"
+            className="w-full bg-surface border-none rounded-2xl p-4 text-fg placeholder:text-subtle focus:ring-1 focus:ring-accent outline-none text-lg font-bold"
             autoFocus
           />
         </div>
@@ -231,7 +232,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
         {error && <p className="inline-error" role="alert">{error}</p>}
 
         <div className="space-y-2">
-          <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Muscle Groups (Select all that apply)</label>
+          <label className="text-[10px] uppercase font-bold text-muted tracking-widest">Muscle Groups (Select all that apply)</label>
           <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2">
             {allMuscleGroups.map(m => (
               <button
@@ -242,7 +243,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
                 onClick={() => toggleMuscle(m)}
                 className={cn(
                   "p-3 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all text-left flex items-center justify-between",
-                  selectedMuscleGroups.includes(m) ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                  selectedMuscleGroups.includes(m) ? "bg-accent text-on-accent border-accent" : "bg-surface-raised text-muted border-border"
                 )}
               >
                 <span>{m}</span>
@@ -253,7 +254,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
         </div>
 
         <div className="space-y-2">
-          <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest">Equipment (Select all that apply)</label>
+          <label className="text-[10px] uppercase font-bold text-muted tracking-widest">Equipment (Select all that apply)</label>
           <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2">
             {allEquipmentItems.map(e => (
               <button
@@ -264,7 +265,7 @@ const CustomExerciseModal = ({ onSave, onCancel }: { onSave: (e: typeof EXERCISE
                 onClick={() => toggleEquipment(e)}
                 className={cn(
                   "p-3 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all text-left flex items-center justify-between",
-                  selectedEquipmentList.includes(e) ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                  selectedEquipmentList.includes(e) ? "bg-accent text-on-accent border-accent" : "bg-surface-raised text-muted border-border"
                 )}
               >
                 <span>{e}</span>
@@ -330,21 +331,21 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
     <div className="profile-section space-y-8 pb-24">
       <header className="profile-header flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="profile-avatar w-16 h-16 shrink-0 bg-[#C6F36B] rounded-full flex items-center justify-center text-black font-bold text-2xl uppercase">
+          <div className="profile-avatar w-16 h-16 shrink-0 bg-accent rounded-full flex items-center justify-center text-on-accent font-bold text-2xl uppercase">
             {(profile?.name || profile?.displayName || 'You')[0]}
           </div>
           <div className="min-w-0">
             <h2 className="text-2xl font-bold break-words">{profile?.name || profile?.displayName || 'Your profile'}</h2>
-            <p className="text-zinc-500 text-xs font-mono lowercase break-all">{profile?.email}</p>
+            <p className="text-muted text-xs font-mono lowercase break-all">{profile?.email}</p>
           </div>
         </div>
         <div className="flex space-x-2">
           <button
             onClick={() => setShowCalendar(true)}
             aria-label="Open workout calendar"
-            className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl hover:border-[#C6F36B]/50 transition-colors"
+            className="p-3 bg-surface-raised border border-border rounded-2xl hover:border-accent/50 transition-colors"
           >
-            <Calendar className="w-5 h-5 text-[#C6F36B]" />
+            <Calendar className="w-5 h-5 text-accent" />
           </button>
           <button
             disabled={savingProfile || applyingGoal || !savedProfile}
@@ -359,8 +360,8 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
             className={cn(
               "p-2 rounded-xl border transition-all flex items-center space-x-1.5",
               isEditing
-                ? "bg-[#C6F36B] text-black border-[#C6F36B] font-bold shadow-lg shadow-[#C6F36B]/20"
-                : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700"
+                ? "bg-accent text-on-accent border-accent font-bold shadow-lg shadow-accent/20"
+                : "bg-surface-raised border-border text-muted hover:text-fg hover:border-border"
             )}
             title={isEditing ? "Save Profile" : "Edit Profile"}
           >
@@ -382,24 +383,27 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
       {isEditing && <button className="secondary-button" aria-label="Cancel profile edit" onClick={cancelProfileEdit} disabled={savingProfile}>Cancel edits</button>}
       {profileError && <p className="inline-error" role="alert">{profileError}</p>}
 
+      <section className="bg-surface border border-border rounded-3xl p-5 flex flex-wrap items-center justify-between gap-4" aria-label="Appearance settings">
+        <div><h3 className="font-semibold">Settings</h3><p className="text-sm text-muted mt-1">Choose a theme for your entire workspace.</p></div><SettingsButton showLabel />
+      </section>
       {goalError && <p className="inline-error" role="alert">{goalError}</p>}
-      {suggestedGoal && <section className="change-preview"><p className="eyebrow text-[#C6F36B]">{demo ? 'Sample suggestion' : 'Review before saving'}</p><h3 className="text-lg font-semibold mt-2">Suggested goal</h3><p className="mt-3">{suggestedGoal.value}</p><div className="flex flex-wrap gap-3 mt-4"><button className="primary-button" disabled={applyingGoal || isEditing} onClick={async () => { setApplyingGoal(true); try { await onUpdate({ [suggestedGoal.key]: suggestedGoal.value }, suggestedGoal.proposal); setSuggestedGoal(null); setGoalError(''); } catch (e: any) { setGoalError(e.message || 'Your goal could not be saved. Try again.'); } finally { setApplyingGoal(false); } }}>{applyingGoal ? 'Saving…' : 'Apply goal'}</button><button className="secondary-button" disabled={applyingGoal} onClick={() => setSuggestedGoal(null)}>Discard</button></div></section>}
+      {suggestedGoal && <section className="change-preview"><p className="eyebrow text-accent">{demo ? 'Sample suggestion' : 'Review before saving'}</p><h3 className="text-lg font-semibold mt-2">Suggested goal</h3><p className="mt-3">{suggestedGoal.value}</p><div className="flex flex-wrap gap-3 mt-4"><button className="primary-button" disabled={applyingGoal || isEditing} onClick={async () => { setApplyingGoal(true); try { await onUpdate({ [suggestedGoal.key]: suggestedGoal.value }, suggestedGoal.proposal); setSuggestedGoal(null); setGoalError(''); } catch (e: any) { setGoalError(e.message || 'Your goal could not be saved. Try again.'); } finally { setApplyingGoal(false); } }}>{applyingGoal ? 'Saving…' : 'Apply goal'}</button><button className="secondary-button" disabled={applyingGoal} onClick={() => setSuggestedGoal(null)}>Discard</button></div></section>}
       {/* Goal & Measurements */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-[#131d1b] p-6 rounded-3xl border border-zinc-800 space-y-5">
+        <div className="bg-surface p-6 rounded-3xl border border-border space-y-5">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">My Vision &amp; Goals</h3>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-muted font-mono">My Vision &amp; Goals</h3>
             <div className="flex items-center space-x-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#C6F36B] animate-pulse" />
-              <p className="text-[9px] text-zinc-500 uppercase font-mono tracking-wider">Goals you control</p>
+              <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+              <p className="text-[9px] text-muted uppercase font-mono tracking-wider">Goals you control</p>
             </div>
           </div>
 
           {/* Short-term Goal */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">
-                Short-term <span className="normal-case text-zinc-700 font-normal">(next few months)</span>
+              <p className="text-[10px] text-muted uppercase font-mono tracking-widest">
+                Short-term <span className="normal-case text-subtle font-normal">(next few months)</span>
               </p>
               <button
                 disabled={isEditing || isRefiningShort || isRefiningLong || applyingGoal}
@@ -420,7 +424,7 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
                   finally { setIsRefiningShort(false); }
                 }}
                 className={cn("p-1.5 rounded-lg border transition-all flex items-center space-x-1",
-                  isRefiningShort ? "border-[#C6F36B]/50 text-[#C6F36B] animate-pulse" : "border-zinc-800 text-zinc-500 hover:text-[#C6F36B] hover:border-[#C6F36B]/40"
+                  isRefiningShort ? "border-accent/50 text-accent animate-pulse" : "border-border text-muted hover:text-accent hover:border-accent/40"
                 )}
                 title="Refine short-term goal with AI"
                 aria-label="Refine short-term goal with AI"
@@ -431,22 +435,22 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
             </div>
             {isEditing ? (
               <input
-                className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#C6F36B]/50 outline-none transition-colors text-sm"
+                className="bg-surface-raised border border-border px-4 py-2.5 rounded-xl w-full text-fg focus:border-accent/50 outline-none transition-colors text-sm"
                 aria-label="Short-term goal" maxLength={500} disabled={savingProfile}
                 value={profile?.shortTermGoal || ''}
                 placeholder="e.g. Gain 5kg lean muscle by August"
                 onChange={(e) => changeProfile({ shortTermGoal: e.target.value })}
               />
             ) : (
-              <p className="text-lg font-bold">{profile?.shortTermGoal || <span className="text-zinc-600 font-normal italic text-sm">No short-term goal set yet</span>}</p>
+              <p className="text-lg font-bold">{profile?.shortTermGoal || <span className="text-subtle font-normal italic text-sm">No short-term goal set yet</span>}</p>
             )}
           </div>
 
           {/* Long-term Goal */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">
-                Long-term <span className="normal-case text-zinc-700 font-normal">(1 year+)</span>
+              <p className="text-[10px] text-muted uppercase font-mono tracking-widest">
+                Long-term <span className="normal-case text-subtle font-normal">(1 year+)</span>
               </p>
               <button
                 disabled={isEditing || isRefiningShort || isRefiningLong || applyingGoal}
@@ -467,7 +471,7 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
                   finally { setIsRefiningLong(false); }
                 }}
                 className={cn("p-1.5 rounded-lg border transition-all flex items-center space-x-1",
-                  isRefiningLong ? "border-[#C6F36B]/50 text-[#C6F36B] animate-pulse" : "border-zinc-800 text-zinc-500 hover:text-[#C6F36B] hover:border-[#C6F36B]/40"
+                  isRefiningLong ? "border-accent/50 text-accent animate-pulse" : "border-border text-muted hover:text-accent hover:border-accent/40"
                 )}
                 title="Refine long-term goal with AI"
                 aria-label="Refine long-term goal with AI"
@@ -478,36 +482,36 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
             </div>
             {isEditing ? (
               <input
-                className="bg-zinc-900 border border-zinc-800 px-4 py-2.5 rounded-xl w-full text-white focus:border-[#C6F36B]/50 outline-none transition-colors text-sm"
+                className="bg-surface-raised border border-border px-4 py-2.5 rounded-xl w-full text-fg focus:border-accent/50 outline-none transition-colors text-sm"
                 aria-label="Long-term goal" maxLength={500} disabled={savingProfile}
                 value={profile?.longTermGoal || ''}
                 placeholder="e.g. Compete in Men's Physique by 2026"
                 onChange={(e) => changeProfile({ longTermGoal: e.target.value })}
               />
             ) : (
-              <p className="text-base font-semibold text-zinc-200">{profile?.longTermGoal || <span className="text-zinc-600 font-normal italic text-sm">No long-term goal set yet</span>}</p>
+              <p className="text-base font-semibold text-fg-soft">{profile?.longTermGoal || <span className="text-subtle font-normal italic text-sm">No long-term goal set yet</span>}</p>
             )}
           </div>
 
           {/* Detailed Aim */}
           <div className="space-y-1.5">
-            <p className="text-[10px] text-zinc-500 uppercase font-mono tracking-widest">Detailed Aim &amp; Vision</p>
+            <p className="text-[10px] text-muted uppercase font-mono tracking-widest">Detailed Aim &amp; Vision</p>
             {isEditing ? (
               <textarea
-                className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl w-full text-white text-xs resize-none h-20 focus:border-[#C6F36B]/50 outline-none transition-colors"
+                className="bg-surface-raised border border-border px-4 py-3 rounded-xl w-full text-fg text-xs resize-none h-20 focus:border-accent/50 outline-none transition-colors"
                 aria-label="Detailed aim" maxLength={2000} disabled={savingProfile}
                 value={profile?.aim || ''}
                 placeholder="Describe what you want to achieve, your motivation, and your ultimate vision..."
                 onChange={(e) => changeProfile({ aim: e.target.value })}
               />
             ) : (
-              <p className="text-sm text-zinc-400 italic">"{profile?.aim || 'Describe your vision here...'}"</p>
+              <p className="text-sm text-muted italic">"{profile?.aim || 'Describe your vision here...'}"</p>
             )}
           </div>
         </div>
 
-        <div className="bg-[#101010] p-6 rounded-3xl border border-zinc-800 space-y-6">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">Vital Stats &amp; Measurements</h3>
+        <div className="bg-surface p-6 rounded-3xl border border-border space-y-6">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-muted font-mono">Vital Stats &amp; Measurements</h3>
           <div className="grid grid-cols-2 gap-x-4 gap-y-6">
             {[
               { label: 'Age', key: 'age', unit: 'yrs', type: 'number' },
@@ -517,11 +521,11 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
 
             ].map((m) => (
               <div key={m.key} className="space-y-1">
-                <p className="text-[10px] text-zinc-600 uppercase font-mono">{m.label}</p>
+                <p className="text-[10px] text-subtle uppercase font-mono">{m.label}</p>
                 {isEditing ? (
                   m.type === 'select' ? (
                     <select
-                      className="bg-zinc-900 border border-zinc-800 px-2 py-1 rounded w-full text-white font-bold"
+                      className="bg-surface-raised border border-border px-2 py-1 rounded w-full text-fg font-bold"
                       aria-label={m.label} disabled={savingProfile}
                       value={profile?.[m.key as keyof UserProfile] || ''}
                       onChange={(e) => changeProfile({ [m.key]: e.target.value })}
@@ -532,7 +536,7 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
                   ) : (
                     <input
                       type="number" aria-label={m.unit ? `${m.label} (${m.unit})` : m.label} disabled={savingProfile}
-                      className="bg-zinc-900 border border-zinc-800 px-2 py-1 rounded w-full text-white font-bold"
+                      className="bg-surface-raised border border-border px-2 py-1 rounded w-full text-fg font-bold"
                       value={profile?.[m.key as keyof UserProfile] || ''}
                       onChange={(e) => changeProfile({ [m.key]: e.target.value === '' ? undefined : Number(e.target.value) })}
                     />
@@ -540,7 +544,7 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
                 ) : (
                   <p className="text-lg font-bold">
                     {profile?.[m.key as keyof UserProfile] || '-'}
-                    {m.unit && <span className="text-[10px] text-zinc-500 ml-1 uppercase">{m.unit}</span>}
+                    {m.unit && <span className="text-[10px] text-muted ml-1 uppercase">{m.unit}</span>}
                   </p>
                 )}
               </div>
@@ -548,26 +552,26 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
           </div>
         </div>
 
-        <div className="bg-[#131d1b] p-6 rounded-3xl border border-zinc-800 space-y-4">
+        <div className="bg-surface p-6 rounded-3xl border border-border space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono">Google Sheets</h3>
+            <h3 className="text-xs font-bold uppercase tracking-widest text-muted font-mono">Google Sheets</h3>
             <div className="flex items-center space-x-2">
               {sheets.connected && (
                 <button
                   onClick={sheets.disconnect}
-                  className="text-[10px] text-zinc-600 hover:text-red-500 uppercase font-mono tracking-tighter"
+                  className="text-[10px] text-subtle hover:text-danger uppercase font-mono tracking-tighter"
                 >
                   Disconnect
                 </button>
               )}
-              <div className={cn("w-2 h-2 rounded-full", sheets.connected ? "bg-[#C6F36B]" : "bg-red-500")} />
+              <div className={cn("w-2 h-2 rounded-full", sheets.connected ? "bg-accent" : "bg-danger")} />
             </div>
           </div>
 
           {!sheets.connected ? (
             <button
               onClick={sheets.connect}
-              className="w-full py-3 bg-white text-black font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-zinc-200 transition-all"
+              className="w-full py-3 bg-accent text-on-accent font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-accent-hover transition-all"
             >
               Connect Google Sheets
             </button>
@@ -575,27 +579,27 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
             <button
               disabled={isCreatingSheet}
               onClick={handleCreateSheet}
-              className="w-full py-3 bg-[#C6F36B] text-black font-bold rounded-xl text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+              className="w-full py-3 bg-accent text-on-accent font-bold rounded-xl text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
             >
               {isCreatingSheet ? 'Creating Sheet...' : 'Create Logging Sheet'}
             </button>
           ) : (
             <div className="space-y-2">
-              <div className="bg-black/30 p-4 rounded-2xl border border-zinc-800">
-                <p className="text-[10px] text-zinc-500 font-mono uppercase mb-1">Spreadsheet Connected</p>
+              <div className="bg-surface-raised p-4 rounded-2xl border border-border">
+                <p className="text-[10px] text-muted font-mono uppercase mb-1">Spreadsheet Connected</p>
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-mono text-zinc-300 truncate mr-4">ID: {sheets.spreadsheetId.slice(0, 8)}...{sheets.spreadsheetId.slice(-4)}</p>
+                  <p className="text-xs font-mono text-fg-soft truncate mr-4">ID: {sheets.spreadsheetId.slice(0, 8)}...{sheets.spreadsheetId.slice(-4)}</p>
                   <a
                     href={`https://docs.google.com/spreadsheets/d/${sheets.spreadsheetId}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[#C6F36B] hover:underline text-[10px] uppercase font-bold"
+                    className="text-accent hover:underline text-[10px] uppercase font-bold"
                   >
                     Open
                   </a>
                 </div>
               </div>
-              <p className="text-[9px] text-zinc-600 italic">Workouts will automatically sync to this sheet.</p>
+              <p className="text-[9px] text-subtle italic">Workouts will automatically sync to this sheet.</p>
             </div>
           )}
         </div>
@@ -608,19 +612,19 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-6"
+            className="fixed inset-0 z-50 bg-overlay/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-6"
           >
-            <div ref={calendarDialogRef} role="dialog" aria-modal="true" aria-labelledby="workout-calendar-title" tabIndex={-1} className="bg-[#131d1b] w-full max-w-md max-h-[95dvh] overflow-y-auto rounded-3xl border border-zinc-800 shadow-2xl">
-              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+            <div ref={calendarDialogRef} role="dialog" aria-modal="true" aria-labelledby="workout-calendar-title" tabIndex={-1} className="bg-surface w-full max-w-md max-h-[95dvh] overflow-y-auto rounded-3xl border border-border shadow-2xl">
+              <div className="p-6 border-b border-border flex items-center justify-between">
                 <button aria-label="Previous month" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}><ChevronLeft /></button>
                 <h3 id="workout-calendar-title" className="font-bold">Workout calendar, {format(currentMonth, 'MMMM yyyy')}</h3>
                 <button aria-label="Next month" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}><ChevronRight /></button>
               </div>
               <div className="p-3 sm:p-6">
-                {!historyComplete && <p className="text-xs text-zinc-400 mb-4">This calendar shows loaded sessions. Load older sessions in Progress to include earlier history.</p>}
+                {!historyComplete && <p className="text-xs text-muted mb-4">This calendar shows loaded sessions. Load older sessions in Progress to include earlier history.</p>}
                 <div className="grid grid-cols-7 gap-2 mb-4">
                   {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => (
-                    <div key={i} aria-label={d} className="text-center text-[10px] text-zinc-600 font-bold">{d[0]}</div>
+                    <div key={i} aria-label={d} className="text-center text-[10px] text-subtle font-bold">{d[0]}</div>
                   ))}
                   {days.map((day, i) => {
                     const dateStr = format(day, 'yyyy-MM-dd');
@@ -632,11 +636,11 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
                         key={i}
                         className={cn(
                           "aspect-square flex flex-col items-center justify-center rounded-xl relative",
-                          isToday && "ring-1 ring-[#C6F36B]",
+                          isToday && "ring-1 ring-accent",
                           !isSameMonth(day, currentMonth) && 'opacity-30'
                         )}
                       >
-                        <span className="text-[10px] text-zinc-500 mb-1">{format(day, 'd')}</span>
+                        <span className="text-[10px] text-muted mb-1">{format(day, 'd')}</span>
                         {workedOut ? (
                           <span className="text-lg">🔥</span>
                         ) : (
@@ -649,7 +653,7 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
               <button
                 onClick={() => setShowCalendar(false)}
                 aria-label="Close workout calendar"
-                  className="w-full bg-[#C6F36B] text-black font-bold py-3 rounded-2xl mt-4"
+                  className="w-full bg-accent text-on-accent font-bold py-3 rounded-2xl mt-4"
                 >
                   Close
                 </button>
@@ -661,7 +665,7 @@ const ProfileSection = ({ profile: savedProfile, workouts, onUpdate, onSignOut, 
 
       <button
         onClick={onSignOut}
-        className="text-zinc-600 font-bold flex items-center justify-center w-full py-4 border border-zinc-800 rounded-3xl hover:bg-red-500/10 hover:text-red-500 transition-colors"
+        className="text-subtle font-bold flex items-center justify-center w-full py-4 border border-border rounded-3xl hover:bg-danger/10 hover:text-danger transition-colors"
       >
         Sign Out
       </button>
@@ -680,9 +684,9 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
     <div className="space-y-6 pb-24">
       <header className="flex items-center justify-between">
         <div>
-          <p className="eyebrow text-[#C6F36B] mb-2">Your training, organized</p>
+          <p className="eyebrow text-accent mb-2">Your training, organized</p>
           <h2 className="text-3xl font-semibold tracking-tight">Your workouts</h2>
-          <p className="text-zinc-400 text-sm mt-2">Routines for showing up, feeling good, and getting stronger.</p>
+          <p className="text-muted text-sm mt-2">Routines for showing up, feeling good, and getting stronger.</p>
         </div>
         <button
           onClick={onCreate}
@@ -695,12 +699,12 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
 
       <div className="routine-grid">
         {routines.length === 0 ? (
-          <div className="bg-[#131d1b] p-12 rounded-3xl border border-dashed border-zinc-800 text-center flex flex-col items-center">
-            <Dumbbell className="w-12 h-12 text-zinc-700 mb-4" />
-            <p className="text-zinc-500 text-sm mb-6">No routines found. Create your first split to speed up your logs.</p>
+          <div className="bg-surface p-12 rounded-3xl border border-dashed border-border text-center flex flex-col items-center">
+            <Dumbbell className="w-12 h-12 text-subtle mb-4" />
+            <p className="text-muted text-sm mb-6">No routines found. Create your first split to speed up your logs.</p>
             <button
               onClick={onCreate}
-              className="bg-white text-black font-bold px-8 py-3 rounded-full text-sm hover:opacity-90 transition-all"
+              className="bg-accent text-on-accent font-bold px-8 py-3 rounded-full text-sm hover:opacity-90 transition-all"
             >
               Create New Routine
             </button>
@@ -716,8 +720,8 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
               <div className="flex items-start justify-between">
                 <button onClick={() => onEdit(r)} className="text-left flex-1 min-w-0" aria-label={`Edit ${r.name}`}>
                   <span className="routine-number">{String(i + 1).padStart(2, '0')}</span>
-                  <h3 className="text-xl font-semibold group-hover:text-[#C6F36B] transition-colors mt-5">{r.name}</h3>
-                  <p className="text-sm text-zinc-400 mt-2 line-clamp-2">{r.description || r.exercises.map(e => e.name).join(', ')}</p>
+                  <h3 className="text-xl font-semibold group-hover:text-accent transition-colors mt-5">{r.name}</h3>
+                  <p className="text-sm text-muted mt-2 line-clamp-2">{r.description || r.exercises.map(e => e.name).join(', ')}</p>
                 </button>
                 <div className="flex items-center space-x-2">
                   <button
@@ -725,7 +729,7 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
                       e.stopPropagation();
                       if (r.id) onDelete(r.id);
                     }}
-                    className="p-3 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all relative z-10"
+                    className="p-3 text-subtle hover:text-danger hover:bg-danger/10 rounded-xl transition-all relative z-10"
                     title="Delete Routine"
                     aria-label={`Delete ${r.name}`}
                   >
@@ -736,14 +740,14 @@ const RoutinesManager = ({ routines, onStart, onEdit, onCreate, onDelete }: {
                       e.stopPropagation();
                       onStart(r);
                     }}
-                    className="bg-[#C6F36B] text-black p-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-[#C6F36B]/5 relative z-10"
+                    className="bg-accent text-on-accent p-3 rounded-xl hover:scale-105 active:scale-95 transition-all shadow-lg shadow-accent/5 relative z-10"
                     aria-label={`Start ${r.name}`}
                   >
                     <Play className="w-4 h-4 fill-current" />
                   </button>
                 </div>
               </div>
-              <div className="routine-footer"><span><Dumbbell className="w-3.5 h-3.5" />{r.exercises.length} exercises</span><span>{r.exercises.reduce((n, e) => n + e.sets.length, 0)} sets</span><button onClick={() => onEdit(r)} className="ml-auto text-[#C6F36B]" aria-label={`View ${r.name}`}>View plan<ChevronRight className="w-4 h-4" /></button></div>
+              <div className="routine-footer"><span><Dumbbell className="w-3.5 h-3.5" />{r.exercises.length} exercises</span><span>{r.exercises.reduce((n, e) => n + e.sets.length, 0)} sets</span><button onClick={() => onEdit(r)} className="ml-auto text-accent" aria-label={`View ${r.name}`}>View plan<ChevronRight className="w-4 h-4" /></button></div>
             </motion.div>
           ))
         )}
@@ -830,16 +834,16 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
   };
 
   return (
-    <div ref={selectorDialogRef} role="dialog" aria-modal="true" aria-labelledby="exercise-selector-title" tabIndex={-1} className="fixed inset-0 bg-black z-50 flex flex-col overflow-hidden">
-      <header className="flex items-center justify-between p-4 border-b border-zinc-900">
-        <button onClick={onCancel} aria-label="Close exercise selector" className="p-2 text-zinc-400">
+    <div ref={selectorDialogRef} role="dialog" aria-modal="true" aria-labelledby="exercise-selector-title" tabIndex={-1} className="fixed inset-0 bg-bg z-50 flex flex-col overflow-hidden">
+      <header className="flex items-center justify-between p-4 border-b border-border">
+        <button onClick={onCancel} aria-label="Close exercise selector" className="p-2 text-muted">
           <ChevronLeft className="w-6 h-6" />
         </button>
         <h2 id="exercise-selector-title" className="text-lg font-bold">Exercises</h2>
         <button
           onClick={() => setShowCustomModal(true)}
           aria-label="Add custom exercise"
-          className="p-2 text-[#C6F36B]"
+          className="p-2 text-accent"
           title="Add Custom Exercise"
         >
           <Plus className="w-6 h-6" />
@@ -848,12 +852,12 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
 
       <div className="p-4 space-y-4">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
             <input
               type="text"
               aria-label="Search exercises"
             placeholder="Search exercise"
-            className="w-full bg-[#131d1b] border-none rounded-lg py-2.5 pl-10 pr-4 text-sm focus:ring-1 focus:ring-[#C6F36B]"
+            className="w-full bg-surface border-none rounded-lg py-2.5 pl-10 pr-4 text-sm focus:ring-1 focus:ring-accent"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -865,7 +869,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             aria-label={`Filter by equipment: ${selectedEquip}`}
             className={cn(
               "py-2.5 rounded-md text-[10px] font-bold flex items-center justify-center space-x-1 border transition-all",
-              selectedEquip !== "All Equipment" ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-300 border-zinc-800"
+              selectedEquip !== "All Equipment" ? "bg-accent text-on-accent border-accent" : "bg-surface-raised text-fg-soft border-border"
             )}
           >
             <span className="truncate max-w-[80px]">{selectedEquip}</span>
@@ -876,7 +880,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             aria-label={`Filter by muscle: ${selectedMuscle}`}
             className={cn(
               "py-2.5 rounded-md text-[10px] font-bold flex items-center justify-center space-x-1 border transition-all",
-              selectedMuscle !== "All Muscles" ? "bg-[#C6F36B] text-black border-[#C6F36B]" : "bg-zinc-900 text-zinc-300 border-zinc-800"
+              selectedMuscle !== "All Muscles" ? "bg-accent text-on-accent border-accent" : "bg-surface-raised text-fg-soft border-border"
             )}
           >
             <span className="truncate max-w-[80px]">{selectedMuscle}</span>
@@ -897,8 +901,8 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
       <div className="flex-1 overflow-y-auto px-4 pb-20 no-scrollbar">
         {search === '' && selectedEquip === "All Equipment" && selectedMuscle === "All Muscles" && (
           <div className="mb-6">
-            <h3 className="text-zinc-500 text-xs font-bold mb-4 uppercase tracking-wider">Suggested exercises</h3>
-            <div className="divide-y divide-zinc-900">
+            <h3 className="text-muted text-xs font-bold mb-4 uppercase tracking-wider">Suggested exercises</h3>
+            <div className="divide-y divide-border">
               {suggestedExercises.map((e) => (
                 <button
                   key={`recent-${e.id}`}
@@ -908,10 +912,10 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
                   <div className="flex items-center space-x-4">
                     <div>
                       <div className="font-bold text-[15px]">{e.name}</div>
-                      <div className="text-xs text-zinc-500">{e.muscle}</div>
+                      <div className="text-xs text-muted">{e.muscle}</div>
                     </div>
                   </div>
-                  <ChevronRight className="w-4 h-4 text-zinc-800 group-hover:text-zinc-600" />
+                  <ChevronRight className="w-4 h-4 text-subtle group-hover:text-subtle" />
                 </button>
               ))}
             </div>
@@ -919,10 +923,10 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
         )}
 
         <div>
-          <h3 className="text-zinc-500 text-xs font-bold mb-4 uppercase tracking-wider">
+          <h3 className="text-muted text-xs font-bold mb-4 uppercase tracking-wider">
             {filtered.length} {filtered.length === 1 ? 'Exercise' : 'Exercises'}
           </h3>
-          <div className="divide-y divide-zinc-900">
+          <div className="divide-y divide-border">
             {filtered.map((e) => (
               <button
                 key={e.id}
@@ -932,14 +936,14 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
                 <div className="flex items-center space-x-4">
                   <div>
                     <div className="font-bold text-[15px]">{e.name}</div>
-                    <div className="text-[10px] text-zinc-500 uppercase font-mono tracking-tighter">
+                    <div className="text-[10px] text-muted uppercase font-mono tracking-tighter">
                       {e.muscle_groups && e.muscle_groups.length > 0 ? e.muscle_groups.join(', ') : e.muscle}
                       <span className="mx-1">•</span>
                       {(e.equipment_list && e.equipment_list.length > 0 ? e.equipment_list[0] : (e.equipment || 'Bodyweight'))}
                     </div>
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-zinc-800 group-hover:text-zinc-600" />
+                <ChevronRight className="w-4 h-4 text-subtle group-hover:text-subtle" />
               </button>
             ))}
           </div>
@@ -947,11 +951,11 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
 
         {filtered.length === 0 && (
           <div className="py-20 text-center flex flex-col items-center">
-            <Info className="w-8 h-8 text-zinc-800 mb-2" />
-            <p className="text-zinc-500 italic">No matches found for this filter.</p>
+            <Info className="w-8 h-8 text-subtle mb-2" />
+            <p className="text-muted italic">No matches found for this filter.</p>
             <button
               onClick={() => { setSelectedEquip("All Equipment"); setSelectedMuscle("All Muscles"); setSearch(''); }}
-              className="mt-4 text-[#C6F36B] text-sm font-bold"
+              className="mt-4 text-accent text-sm font-bold"
             >
               Reset Filters
             </button>
@@ -966,7 +970,7 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex items-end justify-center"
+            className="fixed inset-0 z-[60] bg-overlay/90 backdrop-blur-sm flex items-end justify-center"
             onClick={() => setActiveFilter(null)}
           >
             <motion.div
@@ -974,16 +978,16 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="bg-[#131d1b] w-full max-h-[70vh] rounded-t-[32px] border-t border-zinc-800 overflow-hidden flex flex-col shadow-2xl"
+              className="bg-surface w-full max-h-[70vh] rounded-t-[32px] border-t border-border overflow-hidden flex flex-col shadow-2xl"
               ref={filterDialogRef} role="dialog" aria-modal="true" aria-labelledby="exercise-filter-title" tabIndex={-1}
               onClick={e => e.stopPropagation()}
             >
-              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+              <div className="p-6 border-b border-border flex items-center justify-between">
                 <h3 id="exercise-filter-title" className="text-lg font-bold">Select {activeFilter === 'equip' ? 'Equipment' : 'Muscle Group'}</h3>
                 <button
                   onClick={() => setActiveFilter(null)}
                   aria-label="Close filter options"
-                  className="p-1 text-zinc-500 hover:text-white"
+                  className="p-1 text-muted hover:text-fg"
                 >
                   <ChevronDown className="w-6 h-6" />
                 </button>
@@ -1000,8 +1004,8 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
                     className={cn(
                       "w-full text-left p-4 rounded-2xl transition-all flex items-center justify-between",
                       (activeFilter === 'equip' ? selectedEquip : selectedMuscle) === item
-                        ? "bg-[#C6F36B] text-black font-bold"
-                        : "hover:bg-zinc-800 text-zinc-300"
+                        ? "bg-accent text-on-accent font-bold"
+                        : "hover:bg-surface-hover text-fg-soft"
                     )}
                   >
                     <span>{item}</span>
@@ -1009,10 +1013,10 @@ const ExerciseSelector = ({ onSelect, onCancel }: { onSelect: (e: typeof EXERCIS
                   </button>
                 ))}
               </div>
-              <div className="p-6 bg-zinc-900/50">
+              <div className="p-6 bg-surface-raised/50">
                 <button
                   onClick={() => setActiveFilter(null)}
-                  className="w-full bg-white text-black font-bold py-4 rounded-2xl"
+                  className="w-full bg-accent text-on-accent font-bold py-4 rounded-2xl"
                 >
                   Close
                 </button>
@@ -1061,17 +1065,18 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
   }
 
   return (
-    <div className="routine-editor editor-screen flex flex-col min-h-screen bg-[#0b1211] p-6 pb-32">
+    <div className="routine-editor editor-screen flex flex-col min-h-screen bg-bg p-6 pb-32">
       <header className="flex items-center justify-between mb-8">
-        <button disabled={isSaving} onClick={onCancel} className="text-zinc-500 font-bold">Cancel</button>
+        <button disabled={isSaving} onClick={onCancel} className="text-muted font-bold">Cancel</button>
         <h2 className="text-lg font-bold">Edit Routine</h2>
+        <div className="flex items-center gap-2">
         <button
           disabled={isSaving || !name.trim() || !exercises.length}
           onClick={async () => { if (saveLock.current) return; setSaveError(''); let data; try { data = validateManualRoutine({ name, description, exercises }); } catch (error) { setSaveError(error.message); return; } saveLock.current = true; setIsSaving(true); try { await onSave(data as Partial<Routine>); } catch { setSaveError('The routine could not be saved. Your edits are still here; check your connection and retry.'); } finally { saveLock.current = false; setIsSaving(false); } }}
-          className="text-[#C6F36B] font-bold"
+          className="text-accent font-bold"
         >
           {isSaving ? 'Saving…' : 'Save'}
-        </button>
+        </button><SettingsButton /></div>
       </header>
       {saveError && <p className="inline-error" role="alert">{saveError}</p>}
 
@@ -1081,14 +1086,14 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
-            className="w-full text-3xl font-bold bg-transparent border-none focus:ring-0 p-0 placeholder:text-zinc-800"
+            className="w-full text-3xl font-bold bg-transparent border-none focus:ring-0 p-0 placeholder:text-subtle"
             placeholder="Routine Name" aria-label="Routine name" maxLength={100} disabled={isSaving}
           />
           <input
             type="text"
             value={description}
             onChange={e => setDescription(e.target.value)}
-            className="w-full text-sm text-zinc-500 bg-transparent border-none focus:ring-0 p-0 placeholder:text-zinc-800"
+            className="w-full text-sm text-muted bg-transparent border-none focus:ring-0 p-0 placeholder:text-subtle"
             placeholder="Description (Optional)" aria-label="Routine description" maxLength={1000} disabled={isSaving}
           />
         </div>
@@ -1098,24 +1103,24 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
             <div key={exIdx} className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
-                  <h3 className="text-lg font-bold text-[#C6F36B]">{ex.name}</h3>
+                  <h3 className="text-lg font-bold text-accent">{ex.name}</h3>
                 </div>
                 <button
                   aria-label={`Remove ${ex.name}`} disabled={isSaving} onClick={() => setExercises(exercises.filter((_, i) => i !== exIdx))}
-                  className="text-zinc-700"
+                  className="text-subtle"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
               <div className="space-y-2">
-                <div className="grid grid-cols-4 gap-4 px-2 text-[10px] font-mono text-zinc-600 uppercase tracking-widest text-center">
+                <div className="grid grid-cols-4 gap-4 px-2 text-[10px] font-mono text-subtle uppercase tracking-widest text-center">
                   <div>Set</div>
                   <div>kg</div>
                   <div>Reps</div>
                   <div></div>
                 </div>
                 {ex.sets.map((set, sIdx) => (
-                  <div key={sIdx} className="grid grid-cols-4 gap-4 bg-zinc-900/50 p-2 rounded-xl items-center">
+                  <div key={sIdx} className="grid grid-cols-4 gap-4 bg-surface-raised/50 p-2 rounded-xl items-center">
                     <div className="text-center font-mono text-xs py-2">{sIdx + 1}</div>
                     <input
                       type="number" min={0} max={1000} step="any" aria-label={`${ex.name} set ${sIdx + 1} weight (kg)`} disabled={isSaving}
@@ -1133,7 +1138,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                       onClick={() => {
                         setExercises(current => current.map((exercise, i) => i === exIdx ? { ...exercise, sets: exercise.sets.filter((_, j) => j !== sIdx) } : exercise));
                       }}
-                      disabled={isSaving || ex.sets.length === 1} aria-label={`Remove ${ex.name} set ${sIdx + 1}`} className="flex justify-center text-zinc-700 hover:text-red-500 transition-colors"
+                      disabled={isSaving || ex.sets.length === 1} aria-label={`Remove ${ex.name} set ${sIdx + 1}`} className="flex justify-center text-subtle hover:text-danger transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -1141,7 +1146,7 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
                 ))}
                 <button
                   disabled={isSaving || ex.sets.length >= 20} onClick={() => addSet(exIdx)}
-                  className="w-full py-2 border border-dashed border-zinc-800 rounded-xl text-[10px] text-zinc-600 font-mono uppercase tracking-widest"
+                  className="w-full py-2 border border-dashed border-border rounded-xl text-[10px] text-subtle font-mono uppercase tracking-widest"
                 >
                   Add Base Set
                 </button>
@@ -1151,9 +1156,9 @@ const RoutineEditor = ({ routine, onSave, onCancel }: {
 
           <button
             disabled={isSaving || exercises.length >= 50} onClick={() => setShowExerciseSelector(true)}
-            className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-white font-bold"
+            className="w-full py-4 rounded-2xl bg-surface-raised border border-border flex items-center justify-center space-x-2 text-fg font-bold"
           >
-            <Plus className="w-5 h-5 text-[#C6F36B]" />
+            <Plus className="w-5 h-5 text-accent" />
             <span>Add Exercises</span>
           </button>
         </div>
@@ -1173,27 +1178,27 @@ const ExerciseItem = ({ ex, exIdx, exercises, setExercises, getPrevPerformance, 
     setExercises(next);
   };
   return (
-    <Reorder.Item value={ex} dragListener={false} dragControls={dragControls} className="space-y-4 bg-[#0b1211]">
+    <Reorder.Item value={ex} dragListener={false} dragControls={dragControls} className="space-y-4 bg-bg">
       <div className="exercise-heading">
-        <button disabled={disabled} aria-label={`Drag ${ex.name} to reorder`} onPointerDown={e => !disabled && dragControls.start(e)} className="cursor-grab touch-none p-2 text-zinc-400"><span aria-hidden="true">⠿</span></button>
-        <h3 className="text-lg font-bold text-[#C6F36B] flex-1 min-w-0 break-words">{ex.name}</h3>
+        <button disabled={disabled} aria-label={`Drag ${ex.name} to reorder`} onPointerDown={e => !disabled && dragControls.start(e)} className="cursor-grab touch-none p-2 text-muted"><span aria-hidden="true">⠿</span></button>
+        <h3 className="text-lg font-bold text-accent flex-1 min-w-0 break-words">{ex.name}</h3>
         <button disabled={disabled || exIdx === 0} aria-label={`Move ${ex.name} up`} onClick={() => moveExercise(-1)} className="exercise-action">↑</button>
         <button disabled={disabled || exIdx === exercises.length - 1} aria-label={`Move ${ex.name} down`} onClick={() => moveExercise(1)} className="exercise-action">↓</button>
         <button disabled={disabled} aria-label={`Remove ${ex.name}`} onClick={() => setExercises(exercises.filter((_: any, i: number) => i !== exIdx))} className="exercise-action"><Trash2 className="w-4 h-4" /></button>
       </div>
       <div className="space-y-2">
-        <div className="set-grid set-grid-heading text-[10px] uppercase text-zinc-400"><span>Set</span><span>kg</span><span>Reps</span><span>Time</span><span>Done</span></div>
+        <div className="set-grid set-grid-heading text-[10px] uppercase text-muted"><span>Set</span><span>kg</span><span>Reps</span><span>Time</span><span>Done</span></div>
         {ex.sets.map((set: any, sIdx: number) => {
           const key = setTimerKey(ex, set);
           const running = Boolean(setStartTimes[key]);
           const duration = safeNumber(set.timeTaken) + (running ? Math.max(0, Math.floor((now - setStartTimes[key]) / 1000)) : 0);
-          return <div key={set.sessionKey} className={cn('set-row rounded-xl border p-2', set.completed ? 'bg-[#C6F36B]/10 border-[#C6F36B]/30' : 'bg-zinc-900 border-zinc-800')}>
+          return <div key={set.sessionKey} className={cn('set-row rounded-xl border p-2', set.completed ? 'bg-accent/10 border-accent/30' : 'bg-surface-raised border-border')}>
             <div className="set-grid">
               <span className="text-center text-sm">{sIdx + 1}</span>
               <input disabled={disabled} type="number" min={0} max={1000} step="any" value={set.weight || ''} placeholder="0" aria-label={`${ex.name} set ${sIdx + 1} weight (kg)`} onChange={e => updateSet(exIdx, sIdx, 'weight', safeNumber(parseFloat(e.target.value)))} />
               <input disabled={disabled} type="number" min={0} max={100} step={1} value={set.reps || ''} placeholder="0" aria-label={`${ex.name} set ${sIdx + 1} reps`} onChange={e => updateSet(exIdx, sIdx, 'reps', safeNumber(parseFloat(e.target.value)))} />
-              <input disabled={disabled || running} type="text" value={formatTimeTaken(duration)} placeholder="0:00" aria-label={`${ex.name} set ${sIdx + 1} time (minutes:seconds)`} onChange={e => updateSet(exIdx, sIdx, 'timeTaken', parseTimeTaken(e.target.value))} className={running ? 'text-[#C6F36B]' : ''} />
-              <button disabled={disabled} aria-label={`${set.completed ? 'Undo' : 'Complete'} ${ex.name} set ${sIdx + 1}`} aria-pressed={set.completed} onClick={() => toggleSetComplete(exIdx, sIdx)} className="set-complete">{set.completed ? <CheckCircle2 className="w-6 h-6 text-[#C6F36B]" /> : <span className="w-6 h-6 rounded-md border-2 border-zinc-500" />}</button>
+              <input disabled={disabled || running} type="text" value={formatTimeTaken(duration)} placeholder="0:00" aria-label={`${ex.name} set ${sIdx + 1} time (minutes:seconds)`} onChange={e => updateSet(exIdx, sIdx, 'timeTaken', parseTimeTaken(e.target.value))} className={running ? 'text-accent' : ''} />
+              <button disabled={disabled} aria-label={`${set.completed ? 'Undo' : 'Complete'} ${ex.name} set ${sIdx + 1}`} aria-pressed={set.completed} onClick={() => toggleSetComplete(exIdx, sIdx)} className="set-complete">{set.completed ? <CheckCircle2 className="w-6 h-6 text-accent" /> : <span className="w-6 h-6 rounded-md border-2 border-border" />}</button>
             </div>
             <div className="set-detail"><span>Previous: {getPrevPerformance(ex.name, sIdx)}</span><div className="flex gap-2">
               {!set.completed && <button disabled={disabled || running} onClick={() => startSetTimer(exIdx, sIdx)} aria-label={`Start ${ex.name} set ${sIdx + 1} timer`}>{running ? 'Timing…' : 'Start timer'}</button>}
@@ -1201,7 +1206,7 @@ const ExerciseItem = ({ ex, exIdx, exercises, setExercises, getPrevPerformance, 
             </div></div>
           </div>;
         })}
-        <button disabled={disabled || ex.sets.length >= 30} onClick={() => addSet(exIdx)} className="w-full py-3 rounded-xl border border-zinc-800 text-zinc-400 text-xs">Add Set</button>
+        <button disabled={disabled || ex.sets.length >= 30} onClick={() => addSet(exIdx)} className="w-full py-3 rounded-xl border border-border text-muted text-xs">Add Set</button>
       </div>
     </Reorder.Item>
   );
@@ -1443,28 +1448,28 @@ const WorkoutLogger = ({
 
   if (isComplete) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0b1211] p-6 text-center text-white">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-bg p-6 text-center text-fg">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className="space-y-8 max-w-sm w-full"
         >
-          <div className="w-24 h-24 bg-[#C6F36B] rounded-full flex items-center justify-center mx-auto shadow-[0_0_50px_rgba(204,255,0,0.3)]">
-            <CheckCircle2 className="w-12 h-12 text-black" />
+          <div className="w-24 h-24 bg-accent rounded-full flex items-center justify-center mx-auto shadow-lg shadow-accent/30">
+            <CheckCircle2 className="w-12 h-12 text-on-accent" />
           </div>
           <div>
             <h2 className="text-4xl font-bold mb-2">Crushed It.</h2>
-            <p className="text-zinc-500 font-mono text-xs uppercase tracking-widest">Workout Session Logged</p>
+            <p className="text-muted font-mono text-xs uppercase tracking-widest">Workout Session Logged</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="bg-zinc-900/50 p-4 rounded-3xl border border-zinc-800">
-              <div className="text-2xl font-bold text-[#C6F36B]">{finalVolume} <span className="text-xs font-normal opacity-50 uppercase">kg</span></div>
-              <div className="text-[10px] text-zinc-500 uppercase font-mono">Total Volume</div>
+            <div className="bg-surface-raised/50 p-4 rounded-3xl border border-border">
+              <div className="text-2xl font-bold text-accent">{finalVolume} <span className="text-xs font-normal opacity-50 uppercase">kg</span></div>
+              <div className="text-[10px] text-muted uppercase font-mono">Total Volume</div>
             </div>
-            <div className="bg-zinc-900/50 p-4 rounded-3xl border border-zinc-800">
-              <div className="text-2xl font-bold text-white">{finalIntensity} <span className="text-xs font-normal opacity-50 uppercase">pts</span></div>
-              <div className="text-[10px] text-zinc-500 uppercase font-mono">Intensity</div>
+            <div className="bg-surface-raised/50 p-4 rounded-3xl border border-border">
+              <div className="text-2xl font-bold text-fg">{finalIntensity} <span className="text-xs font-normal opacity-50 uppercase">pts</span></div>
+              <div className="text-[10px] text-muted uppercase font-mono">Intensity</div>
             </div>
           </div>
 
@@ -1483,14 +1488,14 @@ const WorkoutLogger = ({
                   alert("Workout summary copied to clipboard!");
                 }
               }}
-              className="w-full bg-[#C6F36B] text-black font-bold py-4 rounded-2xl flex items-center justify-center space-x-2"
+              className="w-full bg-accent text-on-accent font-bold py-4 rounded-2xl flex items-center justify-center space-x-2"
             >
               <Share2 className="w-5 h-5" />
               <span>Share Achievement</span>
             </button>
             <button
               onClick={onComplete}
-              className="w-full bg-zinc-900 text-zinc-400 font-bold py-4 rounded-2xl border border-zinc-800"
+              className="w-full bg-surface-raised text-muted font-bold py-4 rounded-2xl border border-border"
             >
               View progress
             </button>
@@ -1501,8 +1506,8 @@ const WorkoutLogger = ({
   }
 
   return (
-    <div className="workout-logger editor-screen flex flex-col min-h-screen bg-[#0b1211] pb-32">
-      <header className="sticky top-0 z-30 px-6 py-4 bg-[#0b1211]/95 backdrop-blur-sm border-b border-zinc-800/50">
+    <div className="workout-logger editor-screen flex flex-col min-h-screen bg-bg pb-32">
+      <header className="sticky top-0 z-30 px-6 py-4 bg-bg/95 backdrop-blur-sm border-b border-border/50">
         <input
           type="text" aria-label="Workout name" maxLength={100} disabled={isSaving}
           value={name}
@@ -1510,17 +1515,18 @@ const WorkoutLogger = ({
           className="text-lg font-bold bg-transparent border-none focus:ring-0 p-0 w-full break-words"
         />
         <div className="flex items-center justify-between mt-2">
-          <div className="flex items-center space-x-2 text-[#C6F36B] font-mono text-xs">
+          <div className="flex items-center space-x-2 text-accent font-mono text-xs">
             <Timer className="w-3 h-3" />
             <span>{formatTime(elapsed)}</span>
           </div>
           <div className="flex gap-2 flex-wrap justify-end">
-            {onMinimize && <button onClick={onMinimize} disabled={isSaving} className="text-zinc-400 font-bold px-2 text-sm" aria-label="Minimize workout">Minimize</button>}
-            <button onClick={discardWorkout} disabled={isSaving} className="text-zinc-600 font-bold px-4">Discard</button>
+            <SettingsButton />
+            {onMinimize && <button onClick={onMinimize} disabled={isSaving} className="text-muted font-bold px-2 text-sm" aria-label="Minimize workout">Minimize</button>}
+            <button onClick={discardWorkout} disabled={isSaving} className="text-subtle font-bold px-4">Discard</button>
             <button
               onClick={saveWorkout}
               disabled={isSaving}
-              className="bg-[#C6F36B] text-black font-bold px-6 py-2 rounded-full text-sm shadow-lg shadow-[#C6F36B]/10 disabled:opacity-50"
+              className="bg-accent text-on-accent font-bold px-6 py-2 rounded-full text-sm shadow-lg shadow-accent/10 disabled:opacity-50"
             >
               {isSaving ? 'Saving...' : 'Finish'}
             </button>
@@ -1552,7 +1558,7 @@ const WorkoutLogger = ({
 
         <button
           disabled={isSaving || exercises.length >= 50} onClick={() => setShowExerciseSelector(true)}
-          className="w-full py-4 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center space-x-2 text-[#C6F36B] font-bold hover:bg-zinc-800 transition-colors"
+          className="w-full py-4 rounded-2xl bg-surface-raised border border-border flex items-center justify-center space-x-2 text-accent font-bold hover:bg-surface-hover transition-colors"
         >
           <Plus className="w-5 h-5" />
           <span>Add Exercise</span>
@@ -2039,8 +2045,8 @@ export default function App() {
 
         {/* Normal tab content: shown when not logging OR when minimized */}
         {(!isLogging || isWorkoutMinimized) && (
-          <div className="app-shell text-white">
-            <header className={cn("workspace-topbar", isWorkoutMinimized && isLogging && "has-active-workout")}><a href="/" className="brand"><span className="brand-mark"><Dumbbell className="w-5 h-5" /></span>fitai<span className="brand-dot">.</span></a><div className="flex items-center gap-3">{isWorkoutMinimized && isLogging && <button type="button" onClick={() => setIsWorkoutMinimized(false)} aria-label="Resume workout" className="resume-workout inline-flex min-h-11 items-center gap-2 rounded-full border border-[#C6F36B]/50 px-3 text-sm font-semibold text-[#C6F36B] hover:bg-[#C6F36B]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C6F36B]"><Dumbbell className="h-4 w-4" /><span className="hidden sm:inline">Resume workout</span><span className="sm:hidden">Resume</span><span aria-label={`Elapsed ${formatBubbleTime(workoutElapsed)}`} className="font-mono text-xs">{formatBubbleTime(workoutElapsed)}</span></button>}<span className="workspace-badge">{demoMode ? 'Sample workspace · local only' : 'Your training workspace'}</span><span className="workspace-user">{(profile?.displayName || profile?.name || 'You').slice(0, 1)}</span></div></header>
+          <div className="app-shell text-fg">
+            <header className={cn("workspace-topbar", isWorkoutMinimized && isLogging && "has-active-workout")}><a href="/" className="brand"><span className="brand-mark"><Dumbbell className="w-5 h-5" /></span>fitai<span className="brand-dot">.</span></a><div className="flex items-center gap-3">{isWorkoutMinimized && isLogging && <button type="button" onClick={() => setIsWorkoutMinimized(false)} aria-label="Resume workout" className="resume-workout inline-flex min-h-11 items-center gap-2 rounded-full border border-accent/50 px-3 text-sm font-semibold text-accent hover:bg-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><Dumbbell className="h-4 w-4" /><span className="hidden sm:inline">Resume workout</span><span className="sm:hidden">Resume</span><span aria-label={`Elapsed ${formatBubbleTime(workoutElapsed)}`} className="font-mono text-xs">{formatBubbleTime(workoutElapsed)}</span></button>}<span className="workspace-badge">{demoMode ? 'Sample workspace · local only' : 'Your training workspace'}</span><SettingsButton /><span className="workspace-user">{(profile?.displayName || profile?.name || 'You').slice(0, 1)}</span></div></header>
             {appError && <div className="workspace-alert inline-error" role="alert">{appError}<button onClick={() => setAppError('')} aria-label="Dismiss notification">×</button></div>}
             <main className={cn("workspace-main", activeTab === 'ai' ? 'coach-main' : 'training-main')}>
               <AnimatePresence mode="wait">
@@ -2052,9 +2058,9 @@ export default function App() {
                   transition={{ duration: 0.2 }}
                   className={activeTab === 'ai' ? 'h-full' : 'training-content'}
                 >
-                  {activeTab === 'dash' && <React.Suspense fallback={<p className="text-zinc-400 py-8" role="status">Loading your progress…</p>}><Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} historyComplete={historyComplete} loadingMore={loadingMore} onLoadMore={loadMoreWorkouts} /></React.Suspense>}
+                  {activeTab === 'dash' && <React.Suspense fallback={<p className="text-muted py-8" role="status">Loading your progress…</p>}><Dashboard workouts={workouts} profile={profile} onUpdateProfile={updateProfile} historyComplete={historyComplete} loadingMore={loadingMore} onLoadMore={loadMoreWorkouts} /></React.Suspense>}
                   {activeTab === 'ai' && (
-                    <React.Suspense fallback={<p className="text-zinc-400 p-8" role="status">Opening your coach…</p>}><Coach user={user} preview={demoMode} workouts={workouts} profile={profile} routines={routines}
+                    <React.Suspense fallback={<p className="text-muted p-8" role="status">Opening your coach…</p>}><Coach user={user} preview={demoMode} workouts={workouts} profile={profile} routines={routines}
                       onDataChanged={async () => { await Promise.all([fetchWorkouts(user.uid), fetchRoutines(user.uid)]); if (demoMode) setProfile(readDemo().profile); else { const snap = await getDoc(doc(db, 'users', user.uid)); if (snap.exists()) setProfile(snap.data() as UserProfile); } }} /></React.Suspense>
                   )}
                   {activeTab === 'routines' && (
@@ -2095,7 +2101,7 @@ export default function App() {
                     onClick={() => setActiveTab(tab.id as any)}
                     className={cn(
                       "workspace-nav-item w-full",
-                      activeTab === tab.id ? "text-[#C6F36B]" : "text-zinc-500"
+                      activeTab === tab.id ? "text-accent" : "text-muted"
                     )}
                   >
                     <tab.icon className="w-5 h-5" />
@@ -2103,7 +2109,7 @@ export default function App() {
                   </button>
                 </div>
               ))}
-              <div className="sidebar-note"><Sparkles className="w-5 h-5 text-[#C6F36B]" /><p>A plan is a starting point.<br />You set the pace.</p><span>{demoMode ? 'Sample data, real interactions.' : 'Small steps. Lasting progress.'}</span></div>
+              <div className="sidebar-note"><Sparkles className="w-5 h-5 text-accent" /><p>A plan is a starting point.<br />You set the pace.</p><span>{demoMode ? 'Sample data, real interactions.' : 'Small steps. Lasting progress.'}</span></div>
             </nav>
           </div>
         )}

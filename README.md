@@ -2,6 +2,12 @@
 
 A React training workspace with workout logging, saved routines, progress charts, and a coach that proposes changes for review.
 
+## Appearance
+
+Open the Settings gear in the header, or **Profile → Settings → Appearance settings**, to choose **Dark**, **Light**, **Synthwave**, **Tropical Ambiance**, or **System**. Themes apply immediately to the whole app, including workout editors, exercise pickers, coach previews, calendars, charts, and tooltips. Your choice is saved on this device and synchronized across its open tabs; System follows device appearance changes. Changing a theme keeps unsaved workouts and routine edits intact.
+
+The theme is applied before the app paints to avoid a flash of the previous palette. Browser storage failures leave theme selection usable for the current session.
+
 ## Run locally
 
 Use Node.js 24.5+ (the cloud environment has 24.19.0).
@@ -43,6 +49,7 @@ python3 tests/ui-regression.py # Manual workflows, touch controls and six screen
 python3 tests/dialog-smoke.py # Nested Escape, focus trap/restoration and small dialogs
 python3 tests/progress-smoke.py # Matrix date filtering and body-weight validation
 python3 tests/mobile-layout.py # Seven phone portrait sizes, landscape and reduced-height controls
+python3 tests/theme-smoke.py # Theme persistence, system mode, contrast and themed screens
 NODE_USE_ENV_PROXY=1 npm run eval:agents # Four actual model evals; needs API credential
 ```
 

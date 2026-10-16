@@ -27,13 +27,19 @@ export function useDialog<T extends HTMLElement>(onClose: () => void, enabled = 
         event.stopPropagation();
         closeRef.current();
       } else if (event.key === 'Tab') {
-        const items = Array.from(root.querySelectorAll<HTMLElement>(focusableSelector));
+        const items = Array.from(root.querySelectorAll<HTMLElement>(focusableSelector)).filter(element => {
+          if (!element.getClientRects().length) return false;
+          if (element instanceof HTMLInputElement && element.type === 'radio' && element.name && !element.checked) {
+            return !Array.from(root.querySelectorAll<HTMLInputElement>('input[type="radio"]')).some(other => other.name === element.name && other.checked);
+          }
+          return true;
+        });
         if (!items.length) { event.preventDefault(); root.focus(); return; }
         const first = items[0];
         const last = items[items.length - 1];
-        if (event.shiftKey && (document.activeElement === first || !root.contains(document.activeElement))) {
+        if (event.shiftKey && (document.activeElement === first || !items.includes(document.activeElement as HTMLElement))) {
           event.preventDefault(); last.focus();
-        } else if (!event.shiftKey && (document.activeElement === last || !root.contains(document.activeElement))) {
+        } else if (!event.shiftKey && (document.activeElement === last || !items.includes(document.activeElement as HTMLElement))) {
           event.preventDefault(); first.focus();
         }
       }
