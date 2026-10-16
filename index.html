@@ -10,12 +10,12 @@
         let preference = 'dark';
         try {
           const saved = localStorage.getItem('fitai_theme');
-          if (['dark', 'light', 'synthwave', 'tropical', 'system'].includes(saved)) preference = saved;
+          if (['dark', 'light', 'synthwave', 'tropical', 'graphite', 'porcelain', 'slate', 'system'].includes(saved)) preference = saved;
         } catch {}
         const theme = preference === 'system' ? ((window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true) ? 'dark' : 'light') : preference;
         document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themePreference = preference;
-        document.documentElement.style.colorScheme = ['light', 'tropical'].includes(theme) ? 'light' : 'dark';
+        document.documentElement.style.colorScheme = ['light', 'tropical', 'porcelain'].includes(theme) ? 'light' : 'dark';
       })();
     </script>
     <title>FitAI — Train with intention</title>

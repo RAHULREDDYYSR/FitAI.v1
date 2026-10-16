@@ -95,6 +95,79 @@
   --color-shadow: #37513b;
   color-scheme: light;
 }
+/* Monochromatic palettes keep status colors in the same tonal family. */
+[data-theme="graphite"], [data-preview-theme="graphite"] {
+  --color-bg: #101010;
+  --color-app-bg: #151515;
+  --color-surface: #1b1b1b;
+  --color-surface-raised: #242424;
+  --color-surface-hover: #323232;
+  --color-fg: #f5f5f5;
+  --color-fg-soft: #dddddd;
+  --color-muted: #b8b8b8;
+  --color-subtle: #a8a8a8;
+  --color-border: #555555;
+  --color-accent: #e4e4e4;
+  --color-accent-hover: #ffffff;
+  --color-on-accent: #151515;
+  --color-secondary: #aaaaaa;
+  --color-danger: #f1f1f1;
+  --color-danger-bg: #262626;
+  --color-danger-border: #858585;
+  --color-on-danger: #151515;
+  --color-warning: #d4d4d4;
+  --color-overlay: #060606;
+  --color-shadow: #000000;
+  color-scheme: dark;
+}
+[data-theme="porcelain"], [data-preview-theme="porcelain"] {
+  --color-bg: #f5f5f5;
+  --color-app-bg: #eeeeee;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ededed;
+  --color-surface-hover: #e0e0e0;
+  --color-fg: #1c1c1c;
+  --color-fg-soft: #383838;
+  --color-muted: #565656;
+  --color-subtle: #606060;
+  --color-border: #b7b7b7;
+  --color-accent: #333333;
+  --color-accent-hover: #111111;
+  --color-on-accent: #ffffff;
+  --color-secondary: #626262;
+  --color-danger: #282828;
+  --color-danger-bg: #e8e8e8;
+  --color-danger-border: #888888;
+  --color-on-danger: #ffffff;
+  --color-warning: #444444;
+  --color-overlay: #151515;
+  --color-shadow: #000000;
+  color-scheme: light;
+}
+[data-theme="slate"], [data-preview-theme="slate"] {
+  --color-bg: #141b23;
+  --color-app-bg: #18212b;
+  --color-surface: #1d2732;
+  --color-surface-raised: #25323f;
+  --color-surface-hover: #304050;
+  --color-fg: #eaf0f5;
+  --color-fg-soft: #d5e0e9;
+  --color-muted: #b8c5d2;
+  --color-subtle: #a9b9c9;
+  --color-border: #52677c;
+  --color-accent: #d3e1ef;
+  --color-accent-hover: #e8f1fa;
+  --color-on-accent: #17212b;
+  --color-secondary: #a8bed3;
+  --color-danger: #e2ecf4;
+  --color-danger-bg: #263442;
+  --color-danger-border: #728ba0;
+  --color-on-danger: #15212c;
+  --color-warning: #cfdae6;
+  --color-overlay: #070d13;
+  --color-shadow: #020609;
+  color-scheme: dark;
+}
 html, body { background: var(--color-bg); color: var(--color-fg); }
 ::selection { color: var(--color-on-accent); background: var(--color-accent); }
 input, select, textarea, progress { accent-color: var(--color-accent); }

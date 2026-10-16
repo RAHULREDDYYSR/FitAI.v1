@@ -20,6 +20,9 @@ ARTIFACTS = Path(__file__).parent / 'artifacts' / 'themes'
 THEMES = {
     'Dark': 'dark',
     'Light': 'light',
+    'Graphite': 'graphite',
+    'Porcelain': 'porcelain',
+    'Slate': 'slate',
     'Synthwave': 'synthwave',
     'Tropical Ambiance': 'tropical',
     'System': 'system',
@@ -27,6 +30,9 @@ THEMES = {
 PREFERENCES = {
     'Dark': 'dark',
     'Light': 'light',
+    'Graphite': 'graphite',
+    'Porcelain': 'porcelain',
+    'Slate': 'slate',
     'Synthwave': 'synthwave',
     'Tropical Ambiance': 'tropical',
     'System': 'system',
@@ -143,6 +149,19 @@ def assert_theme(page, choice, view):
     return values
 
 
+def assert_theme_family(choice, values):
+    colors = {name: rgb(value) for name, value in values['root'].items()}
+    if choice in ('Graphite', 'Porcelain'):
+        for name, color in colors.items():
+            spread = max(color[:3]) - min(color[:3])
+            assert spread <= 0.01, f'{choice}: {name} is not grayscale: {color}'
+    if choice == 'Slate':
+        for name, color in colors.items():
+            red, green, blue = color[:3]
+            assert red <= green + 0.01 <= blue + 0.02, f'Slate: {name} is not a cool gray: {color}'
+            assert blue - red <= 0.30, f'Slate: {name} is too colorful for a cool gray palette: {color}'
+
+
 def main():
     page_errors = []
     with sync_playwright() as p:
@@ -154,7 +173,7 @@ def main():
 
         # Settings remain available before and after entering the sample.
         _, login_dialog, login_group = open_settings(page)
-        expect(login_group.get_by_role('radio')).to_have_count(5)
+        expect(login_group.get_by_role('radio')).to_have_count(len(THEMES))
         dark_radio = login_group.get_by_role('radio', name='Dark', exact=True)
         dark_radio.focus()
         page.keyboard.press('ArrowRight')
@@ -180,8 +199,11 @@ def main():
         observed_palettes = {}
         for choice in THEMES:
             dialog = pick_theme(page, choice)
+            assert_theme_family(choice, palette(page, f'{choice} settings'))
+            screenshot(page, choice, 'settings')
             dialog.get_by_role('button', name='Close settings', exact=True).click()
             values = assert_theme(page, choice, 'workouts')
+            assert_theme_family(choice, values)
             if choice != 'System':
                 observed_palettes[choice] = values['root']
             page.reload(wait_until='domcontentloaded')
@@ -273,10 +295,12 @@ def main():
             assert_theme(page, choice, 'calendar')
             page.keyboard.press('Escape')
             nav.get_by_role('button', name='Workouts', exact=True).click()
+            print(f'PASS {choice} theme workflow', flush=True)
 
         palette_signatures = {tuple(colors[name] for name in ('--color-bg', '--color-accent', '--color-secondary'))
                               for colors in observed_palettes.values()}
-        assert len(palette_signatures) == 4, f'Expected four visually distinct palettes, got {palette_signatures}'
+        assert len(palette_signatures) == len(THEMES) - 1, \
+            f'Expected {len(THEMES) - 1} visually distinct palettes, got {palette_signatures}'
 
         # System follows prefers-color-scheme changes and storage events from
         # another same-origin tab. The System choice remains the stored choice.
@@ -323,7 +347,7 @@ def main():
 
         assert not page_errors, f'Uncaught browser errors: {page_errors}'
         browser.close()
-    print('PASS theme picker access, five preferences, persistence, system mode, representative screens, palette contrast, and responsive settings dialog')
+    print(f'PASS theme picker access, {len(THEMES)} preferences, {len(THEMES) - 1} distinct palettes, persistence, system mode, representative screens, palette contrast, and responsive settings dialog')
 
 
 if __name__ == '__main__':

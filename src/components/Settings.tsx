@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Settings as SettingsIcon, Sun, Moon, Waves, Sparkles, Monitor, X, Check } from 'lucide-react';
+import { Settings as SettingsIcon, Sun, Moon, Waves, Sparkles, Monitor, X, Check, Circle, Layers3 } from 'lucide-react';
 import { useTheme } from '../lib/theme-context';
 import { themeOptions } from '../lib/theme';
 import { useDialog } from '../lib/use-dialog';
@@ -36,7 +36,7 @@ export function SettingsDialog() {
   }, [settingsOpen]);
   const dialog = useDialog<HTMLElement>(closeSettings, settingsOpen);
   if (!settingsOpen) return null;
-  const icons = { dark: Moon, light: Sun, synthwave: Sparkles, tropical: Waves, system: Monitor };
+  const icons = { dark: Moon, light: Sun, synthwave: Sparkles, tropical: Waves, graphite: Circle, porcelain: Sun, slate: Layers3, system: Monitor };
   return createPortal(<div className="settings-backdrop" onClick={event => { if (event.target === event.currentTarget) closeSettings(); }}>
     <section role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} ref={dialog} className="settings-dialog">
       <header className="settings-header"><div><p className="eyebrow text-accent">Make it yours</p><h2 id="settings-title">Settings</h2></div>

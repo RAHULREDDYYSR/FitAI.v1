@@ -4,7 +4,9 @@ A React training workspace with workout logging, saved routines, progress charts
 
 ## Appearance
 
-Open the Settings gear in the header, or **Profile → Settings → Appearance settings**, to choose **Dark**, **Light**, **Synthwave**, **Tropical Ambiance**, or **System**. Themes apply immediately to the whole app, including workout editors, exercise pickers, coach previews, calendars, charts, and tooltips. Your choice is saved on this device and synchronized across its open tabs; System follows device appearance changes. Changing a theme keeps unsaved workouts and routine edits intact.
+Open the Settings gear in the header, or **Profile → Settings → Appearance settings**, to choose **Dark**, **Light**, **Synthwave**, **Tropical Ambiance**, **Graphite**, **Porcelain**, **Slate**, or **System**. Themes apply immediately to the whole app, including workout editors, exercise pickers, coach previews, calendars, charts, and tooltips. Your choice is saved on this device and synchronized across its open tabs; System follows device appearance changes. Changing a theme keeps unsaved workouts and routine edits intact.
+
+**Graphite** and **Porcelain** use grayscale throughout; **Slate** uses one family of cool blue-gray tones. These palettes also theme charts, previews, and status messages.
 
 The theme is applied before the app paints to avoid a flash of the previous palette. Browser storage failures leave theme selection usable for the current session.
 
