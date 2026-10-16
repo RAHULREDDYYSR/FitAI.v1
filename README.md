@@ -42,6 +42,7 @@ python3 tests/ui-smoke.py # Running server, Python Playwright, /usr/bin/chromium
 python3 tests/ui-regression.py # Manual workflows, touch controls and six screen sizes
 python3 tests/dialog-smoke.py # Nested Escape, focus trap/restoration and small dialogs
 python3 tests/progress-smoke.py # Matrix date filtering and body-weight validation
+python3 tests/mobile-layout.py # Seven phone portrait sizes, landscape and reduced-height controls
 NODE_USE_ENV_PROXY=1 npm run eval:agents # Four actual model evals; needs API credential
 ```
 
